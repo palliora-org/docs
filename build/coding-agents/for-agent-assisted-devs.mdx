@@ -1,0 +1,23 @@
+---
+title: "For Agent-Assisted Developers"
+---
+
+A growing share of the code that gets written against these docs is written by an AI coding agent acting on a person's behalf, not typed by hand. This page is for that case specifically: what's safe to assume, and where to point an agent so it doesn't have to guess.
+
+Looking for prompting advice as the human in this loop instead? See [Build with a Coding Agent](/build/coding-agents/build-with-a-coding-agent).
+
+## What's different about these docs for an agent
+
+* Every code block in [Quickstart](/build/quickstart), the [guides](/build/guides), and [Encrypted Compute](/build/guides/encrypted-compute) is either runnable as written or clearly marked illustrative, per this repo's [style rules](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/STYLE.md). An agent can copy a block and expect it to at least run, not just read plausibly.
+* Function signatures and behavior described in [SDK Reference](/build/reference/sdk-reference) are checked against `@palliora.org/chainsdk`'s actual source, not guessed from its README alone, which has known-stale spots. Where this repo and the package's README disagree, trust this repo first, then the package's actual TypeScript source if something still looks off.
+* Known gaps and rough edges (like [Encrypted Compute](/build/guides/encrypted-compute)'s guardian-key lookup problem) are stated as gaps, not glossed over. An agent hitting the same wall won't find a hidden solution by reading more carefully, the workaround given is the real workaround.
+
+## `llms.txt`
+
+The repo root has an [`llms.txt`](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/llms.txt), a short, plain-text index of this site's structure and its most load-bearing pages, in the format several AI tools now look for automatically. Point an agent at the raw file (not the GitBook-rendered page) if you want it to orient quickly without crawling the whole site.
+
+## If you're an agent reading this right now
+
+Load [`palliora.skill.md`](/build/coding-agents/palliora.skill) first, it's the condensed version of everything on this page plus the SDK's core call pattern, fee rules, and common failures in one file. Then start at [Quickstart](/build/quickstart) for the fastest path to a working call against the live testnet. If you're about to generate code that talks to Palliora, check [SDK Reference](/build/reference/sdk-reference) for the actual function signature before inventing one, several of this SDK's functions (`inferenceCompute`, `createAgreement`, `runAgent`) take arguments in a specific shape that isn't guessable from their names alone.
+
+If you're writing documentation or examples for a project that itself builds on Palliora, this repo's [`STYLE.md`](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/STYLE.md) is a reasonable default to inherit: simple language, no em dashes, code that runs or says clearly that it doesn't.

@@ -1,0 +1,111 @@
+---
+title: "Guardian key operations"
+---
+
+How the guardians make their shared secret, and how they change it. Every operation here is started on purpose by an admin. Nothing runs on a schedule.
+
+For how the key is used, read [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure). After a revoker de-anonymizes a transaction, it keeps a report on Palliora DA. That report is outside these operations. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## The key
+
+Every transaction is encrypted to one public key:
+
+```
+encryptionPublicKey = S times G, plus the revoker public key R
+```
+
+`S` is the guardians' shared secret. No node and no operator ever holds all of it. Each guardian holds one share. A threshold of guardians, together with the revoker's key, is needed to de-anonymize a transaction.
+
+The mainnet key is in [Network reference](/defi/reference/network-reference#disclosure-network). It is the combined key, so you can compare it with what the SDK uses.
+
+## How the key is made
+
+The nodes run a distributed key generation with verifiable secret sharing. There is no leader.
+
+1. **Deal.** Every node picks a random polynomial. It sends each other node a share of it, encrypted to that node, and publishes commitments to the polynomial.
+2. **Check.** Every node checks the shares it received against the commitments. A dealer whose shares do not match is left out.
+3. **Finalize.** Each node adds up the valid shares it received. That sum is its share of `S`. Each node also works out the group public key from the commitments.
+4. **Seal.** Each node seals its share on disk. It never sends the share anywhere.
+
+No one dealer's secret is the key, and no node ever puts the key together. The admin only starts the ceremony and checks that every node ended with the same group key. The admin never sees a share.
+
+## What an admin can do
+
+| Operation              | What changes                                                   | Group key | Old transactions                    |
+| ---------------------- | -------------------------------------------------------------- | --------- | ----------------------------------- |
+| Initial key generation | A new committee makes a new key                                | New       | Not applicable                      |
+| Refresh                | Every node gets a new share. The committee and threshold stay. | Same      | Still decrypt                       |
+| Threshold change       | A refresh that sets a new threshold                            | Same      | Still decrypt, at the new threshold |
+| Re-key                 | A new key for a new group, with any committee                  | New       | Follow the old group, which is kept |
+| Add or remove nodes    | The shares move to a new committee, in a new group             | Same      | Still decrypt                       |
+
+A refresh protects against slow leaks. Shares that leaked before a refresh cannot be combined with shares from after it.
+
+A re-key does not strand old transactions. Each node keeps its old share for the old group. A transaction stays tied to the key it was encrypted to, so the old committee must stay available while old transactions matter.
+
+## The rule for any change of shares
+
+Refresh, threshold change and membership change are the same operation. The old shareholders each split their own share onto a fresh polynomial and give the pieces to the new committee. The new committee combines the pieces into new shares of the same secret. The secret is never put together.
+
+One condition must hold: **at least the old threshold of honest old shareholders must take part.** On mainnet that is 7. The new committee and the new threshold can be anything else, as long as the new threshold is not larger than the new committee.
+
+* If too few old shareholders are online, the operation fails. Nothing changes.
+* If a dealer cheats and reshares something other than its real share, the others detect it and leave it out. This can leave too few dealers.
+* Lowering the threshold is allowed. It weakens collusion resistance, so treat it as a policy decision.
+* Only a re-key can change the group key.
+
+## Start a ceremony
+
+An admin starts a ceremony with a trigger that is signed by an allowlisted admin wallet. A node accepts a trigger only if the signature is valid, fresh (it expires after 60 seconds) and from an address in its `ADMIN_ADDRESSES`. The admin tool then asks every node for its result and checks that they all agree.
+
+A successful run ends with all nodes reporting the same group key. After a refresh, a threshold change or a membership change, that key is the same as before.
+
+The commands take the form `admin.ts <command> <epoch> <threshold> <group>`. These examples use a local test committee of 5 nodes with a threshold of 3.
+
+| Command                       | Effect                                                         |
+| ----------------------------- | -------------------------------------------------------------- |
+| `admin.ts dkg`                | Initial key generation                                         |
+| `admin.ts reshare 1`          | Refresh into epoch 1                                           |
+| `admin.ts reshare 1 4`        | Refresh into epoch 1 and set the threshold to 4                |
+| `admin.ts dkg 2 3 2`          | Re-key into group 2 with a threshold of 3                      |
+| `admin.ts redistribute 1 2 3` | Move the shares from group 1 to group 2, with a threshold of 3 |
+
+For `redistribute`, name the new committee and the honest old nodes that will deal. The code and the full options are at [github.com/veilnyx/decom](https://github.com/veilnyx/decom/). A local test stack with several nodes and an admin dashboard lets you try each operation before you run it for real.
+
+## Add or remove nodes
+
+Use this to evict a node you no longer trust, to replace a lost host, or to add operators.
+
+1. Pick the honest old nodes that will deal. There must be at least the old threshold.
+2. Name the new committee. It can drop nodes and add new ones that hold no share.
+3. Start the redistribution. The new committee receives fresh shares of the same secret. The new nodes check the dealers against the public commitments.
+4. Check that every node of the new committee reports the same group key as before.
+5. Have the pool owner register the new group with the same `encryptionPublicKey` and the new nodes' addresses, then retire the old group. The evicted node can no longer contribute.
+
+The group key does not change, so the app and the SDK need no update.
+
+## Register a group
+
+A group exists for requests only after the owner registers it in the request contract. The owner sends the nodes' addresses and the `encryptionPublicKey`. The owner can also retire a group.
+
+* A refresh or a threshold change needs no new registration. The nodes and the key are the same, and the revoker finds the live threshold from the guardians.
+* A membership change or a re-key needs a new group.
+* If a revoker's key is compromised, the pool owner can deactivate its group. The guardians then refuse every request for it, including old ones.
+
+## Before you run one
+
+* Check that at least the old threshold of old nodes are up and answering.
+* Practise the operation on a test network first.
+* After it finishes, compare the group key on every node, register or retire groups as needed, back up the sealed shares, and run one real de-anonymization.
+* If a node is lost, replace it with a membership change before you lose another.
+
+## Limits
+
+* A threshold of guardians together can rebuild `S`. They still need the revoker's key to de-anonymize a transaction.
+* A new key protects future transactions only. Old transactions stay tied to the key they were encrypted with.
+* A key ceremony does not change the pool, the contracts or what users do.
+
+## Next
+
+* [Run a Decom guardian](/defi/participate/run-a-decom-guardian)
+* [Network reference](/defi/reference/network-reference)

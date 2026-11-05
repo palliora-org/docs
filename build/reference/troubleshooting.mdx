@@ -1,0 +1,65 @@
+---
+title: "Troubleshooting"
+---
+
+Real failures, and what actually causes them. Most of this comes from `palliora-sdk`'s own `CHAIN-RULES.md` (read that file directly for the full, cited version with source-line references into the network's pallets) and from this workspace's own debugging history building against Manas.
+
+## Fee and agreement failures
+
+A compute agreement has to clear two separate, unrelated checks. Knowing which one failed tells you what to actually fix.
+
+| Symptom                                                                   | What's actually wrong                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InsufficientFreeBalance` at submission                                   | `fees` is below the network's fee floor, or your account's free balance is below `fees`. Call `estimateMinFee` before submitting, see [Fees and Incentives](/learn/concepts/fees-and-incentives).                                                                   |
+| `ZeroComputeRate`                                                         | `computeRate` is `0` on an `Active` or `Subscription` contract. Only `Dormant` contracts may have a zero rate.                                                                                                                                                         |
+| Transaction included, then an `AgreementFailed` event, nothing reserved   | A guardian rejected your offer, your `computeRate` was under that guardian's own declared minimum for the compute type you requested. Raising `computeRate` also raises the fee floor, since it's one of the floor's components.                                       |
+| `compute.agreement` never completes: not rejected, not included, no error | A named guardian hasn't responded yet. The transaction sits in a future queue until every named guardian submits a response. This is a guardian availability problem, not a fee problem, name guardians you have reason to believe are actually live.                  |
+| `ForbiddenCompute`                                                        | You attached a non-default `ComputePayload` to a call that isn't on the allowlist (`submitData`, `agreement`, `result`, `invoke`, `agreementResponse`). The SDK's high-level wrappers set this correctly for you, this mostly shows up when calling `api.tx` directly. |
+| Opaque decode failure on `agreement`                                      | Wrong field shape, commonly snake\_case keys where the type expects camelCase, or a missing enum payload.                                                                                                                                                              |
+
+## Subscription contracts
+
+`Subscription` is a long-lived, pre-funded contract: `compute.agreement` reserves the whole budget up front, and each `compute.invoke` runs one job against it.
+
+| Symptom                                         | What's actually wrong                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AgreementNotFound`                             | Either the contract ID is genuinely unknown, or you're calling `invoke` on a `Subscription` that has no settlement record yet, or has already settled.                                                                                                                                       |
+| `InvalidContractType` on `invoke`               | `invoke` only works on `Subscription` contracts, not `Active` or `Dormant`.                                                                                                                                                                                                                  |
+| `ContractSettled`                               | The contract already settled, either its budget ran out (`BudgetExhausted`) or its deadline passed (`DeadlineReached`).                                                                                                                                                                      |
+| `invoke` returns `Ok`, but nothing actually ran | `invoke` settles and returns `Ok` in both the "ran successfully" case and the "the deadline or budget check settled the contract instead" case. A successful return is not proof a job started, check for a `ComputeInvoked` event, and treat `ContractSettled` as the real terminal signal. |
+
+Every contract, including `Subscription`, also gets an overall deadline at creation (14,400 blocks at genesis, independent of the `deadline` field inside the compute step itself). Hitting that produces `ContractExpired`.
+
+## Guardian group and crypto errors
+
+| Symptom                                                 | What's actually wrong                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Invalid: Custom(149)`                                  | `guardians` is empty while `compute.program` isn't `"Null"`.                                                                                                                                                                                                                                  |
+| `Invalid: Custom(145)`                                  | Duplicate entries in `guardians`.                                                                                                                                                                                                                                                             |
+| `Invalid: Custom(148)`                                  | A named guardian isn't registered or staked.                                                                                                                                                                                                                                                  |
+| `bad point: invalid y coordinate` from `gen_shared_key` | You passed a sr25519 signing key where an Ed25519 encryption key was expected, most commonly from trusting `staking.guardians(address).pubKey`, which is a signing key, not the result-encryption key. See [Encrypted Compute](/build/guides/encrypted-compute) for the actual workaround. |
+| `decrypt()` returns `null`, no crash                    | The key was a validly-encoded Ed25519 point, just the wrong one for this guardian. Different failure mode than the crash above, same root cause: wrong key.                                                                                                                                   |
+| No `compute.result` within the default wait window      | Real inference commonly takes longer than the SDK's 20-block default. Give it a wider window, 300 blocks is a safe starting point, see [Quickstart](/build/quickstart).                                                                                                                    |
+| Model request fails even though the contract succeeded  | Guardians run a small, curated set of models. A model outside that set submits fine and fails at execution. See [Quickstart](/build/quickstart) for the confirmed-working list.                                                                                                            |
+
+## Compute output issues
+
+| Symptom                                 | What's actually wrong                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Result is empty when published          | Only stdout is collected from a compute image, writing to `/output` doesn't get captured.          |
+| Result contains log noise or banners    | stderr is interleaved into stdout.                                                                 |
+| Result looks corrupted or like mojibake | Binary data was written to stdout and decoded as UTF-8 on the way out.                             |
+| Container sees no environment variables | `programEnv` isn't plumbed through in every path, check how your specific submission path sets it. |
+| Image pull fails for a `Url` program    | A `Url` program input expects a `docker save` tarball, not a registry reference.                   |
+
+## Setup and tooling
+
+| Symptom                                                        | What's actually wrong                                                                                                                                                                          |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm install` fails on `@polkadot/wasm-crypto` peer dependency | Use `npm install --legacy-peer-deps`, the package's declared peer range doesn't match what actually resolves. This is a known, confirmed-safe workaround, not a sign something else is broken. |
+| Import errors running an SDK example script                    | The package ships no `dist/` until built, run `pnpm install && pnpm build` first in a local checkout.                                                                                          |
+| `getGuardianParticipants` seems to kill your connection        | It disconnects the shared API instance on exit, by design. If you need the connection afterward, re-initialize it.                                                                             |
+
+## Where to go deeper
+
+This page is a map of symptoms. `palliora-sdk`'s own `CHAIN-RULES.md` explains the actual mechanics behind each one, including the network's fee formula, the guardian offchain worker logic, and contract lifecycle rules, and is the better read once you know roughly where your problem lives.

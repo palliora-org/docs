@@ -1,0 +1,73 @@
+---
+title: "Skill file, downloadable"
+description: "Use when writing code against Palliora DeFi (formerly Veilnyx), the shielded pool on Ethereum and HyperEVM. Covers the SDK (Core, ShieldedAccount), registering, depositing, settling, sending, withdraw"
+---
+
+A condensed map for coding agents. The full pages are in this repo under `build/` and `learn/concepts/`. If this file is wrong, the pages and the SDK source win.
+
+## Facts you must not guess
+
+* Package scope is `@palliora.org/defi-*` (old: `@veilnyx-sdk/*`, same API).
+* Account seed = `keccak256(wallet signature)` mod the BN254 scalar field. `ShieldedAccount.generate(seed)`.
+* The message the wallet signs still says "Veilnyx". Use this exact text: `Sign this message to generate your Veilnyx shielded account.\n\nWARNING: Do not sign this message on any application not affiliated with Veilnyx.`
+* The pool's EIP-712 domain is `{ name: 'Veilnyx', version: '1', chainId, verifyingContract: pool }`.
+* Registration typed data: `RegisterAddress(string message, bytes shieldedAddress)` with message `Register Shielded Address`, and `shieldedAddress` = root address then both public keys, each as a 32-byte word (unpacked). Transactions use the 96-byte packed form from `account.shieldedAddress.pack()`.
+* `TransactionType`: `DEPOSIT` 0, `TRANSFER` 1, `WITHDRAW` 2, `CALL_ADAPTER` 3 (Solidity spells it `CALL_ADAPTOR`).
+* A deposit has `feeAssetId: 0` and is always sent by the user's wallet.
+* Only notes in the commitment tree are spendable. After a deposit, prove and send a tree update (`core.proveTreeUpdate(true)`, then `pool.updateCommitmentTree`).
+* The SDK builds, signs and proves. It does not submit. You call `pool.transact` with `ztx.toSolidityInput()`.
+* Adaptor interface: `handleAssets(AssetAmount[] inAssets, bytes payload) returns (AssetAmount[] outAssets)`, `AssetAmount { uint24 assetId; uint256 value; }`. Adaptors must be stateless (called by `delegatecall`).
+* Chain list in SDK 1.4.3: Ethereum mainnet, Sepolia and dev networks. HyperEVM needs a newer build, `[SDK_VERSION_WITH_HYPEREVM]`, which also adds `relayed`, `paymaster` and `relayFee` to `TransactionOptions`.
+
+## Core call pattern
+
+```ts
+const account = ShieldedAccount.generate(BigInt(keccak256(signature)) % FIELD);
+const core = new Core({ chainId, account, rpc, explorerApi,
+  contracts: { pool, paymaster, deployedBlock },
+  circuits,                       // register, transact21..44, treeUpdate
+  services: { contractSource, notesSource, commitmentTreeSource, addressTreeSource } });
+
+const tx   = await core.createTransaction(
+  { type, assetIds, values, feeAssetId, to, payload }, { revokerId: 0, viaBundler: false });
+const ztx  = await core.proveTransaction(await core.signTransaction(tx));
+// submit: pool.transact(ztx.toSolidityInput())
+```
+
+You supply the four services and the circuit files. The services package's `SimpleTreeSource` lacks `update()`, so write your own `ITreeSource`.
+
+## Submit paths
+
+| Network          | Path                                                                                                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Any, for testing | Wallet calls `pool.transact`. The sender is public.                                                                                                        |
+| Ethereum         | ERC-4337 bundler. `viaBundler: true`, non-zero `feeAssetId`, `userOpFeeQuoteEth`.                                                                          |
+| HyperEVM         | Relayer. `GET /quote`, then `POST /fund { calldata }`, then poll `GET /status/<id>`. The fee must name the relayer as paymaster and be at least the quote. |
+
+## Private Sub-accounts (HyperEVM)
+
+1. Derive: `keccak256(spendingKey (32 bytes) || toHex("veilnyx/hl-burner/m1/" + index, {size: 32}))`. Testnet context is `veilnyx/hl-burner/v1/`. `spendingKey` is `account.signer.privateKey`.
+2. Fund: `CALL_ADAPTER` to the funding adaptor, USDC only, payload `abi.encode(address subAccount)`.
+3. Trade: the Sub-account signs Hyperliquid actions itself. `updateLeverage` with `isCross: false`.
+4. Return: perp to spot, spot to the token system address, buy gas from the GasStation (EIP-3009 `ReceiveWithAuthorization`, submit with `POST /gas`), then the Sub-account approves USDC and calls `pool.transact` with a `DEPOSIT` built by the user's `Core`.
+5. Never fund Sub-account gas from the user's wallet. Never reuse a Sub-account. Never register a Sub-account.
+
+## Common failures
+
+| Message                                  | Fix                                                    |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `Unsupported chainId`                    | SDK build lacks the network.                           |
+| `Explicit services are required for now` | Pass all four services.                                |
+| `Insufficient balance for asset N`       | Notes are still queued. Settle with a tree update.     |
+| `Note commitment ... not found in tree`  | Tree source is out of date.                            |
+| `DoubleSpend`                            | Note source is stale or two transactions share a note. |
+| `UnknownCommitmentTreeRoot`              | Proof is too old. Update trees and prove again.        |
+| `InvalidAddressProof`                    | Second arg of `proveAddress` is not the signer.        |
+| `UnsupportedAdaptor`                     | Pool owner has not registered the adaptor.             |
+| `fee is paid to X, not this relayer Y`   | Read the relayer address from `/quote` before proving. |
+
+## Do not
+
+* Do not print or log spending keys, view keys, the account-creating signature or Sub-account keys.
+* Do not retry a funding call blindly. It pays twice.
+* Do not use em dashes in docs or comments you write for this project.

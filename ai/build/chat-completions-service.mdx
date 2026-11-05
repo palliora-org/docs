@@ -1,0 +1,106 @@
+---
+title: "Build a chat-completions-compatible service"
+---
+
+Most AI tooling (chat UIs, agent frameworks, coding assistants) already speaks one API shape: `POST /v1/chat/completions` with a standard chat-completions body. You don't need any of those tools to know Palliora exists. Wrap a Compute Contract behind that same shape, and anything that speaks that API can call Palliora instead, unmodified.
+
+This is the same pattern a few real Palliora sample services use internally. It's worth building your own small version to understand the shape, rather than only reading about it.
+
+## The core idea
+
+An HTTP request comes in shaped like a standard chat completion. Your service:
+
+1. Builds the same JSON payload [Quickstart](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/quickstart.md) sends through `inferenceCompute`, using the request body's `model` and `messages` fields directly.
+2. Submits the Compute Contract.
+3. Polls for the result, the same `scanForBlockEvent` / `fetchAndDecodeExtrinsic` pattern from [Call a model](/ai/build/call-a-model).
+4. Wraps the answer back into a chat-completions-shaped response object and returns it.
+
+The caller never sees a block number, an agreement ID, or a Guardian. They see the same response shape they'd get from any other chat-completions endpoint.
+
+## A minimal version
+
+```ts
+// server.mjs
+import express from "express";
+import {
+  init,
+  getKeyring,
+  getGuardianAddress,
+  inferenceCompute,
+  getApi,
+  scanForBlockEvent,
+  fetchAndDecodeExtrinsic,
+} from "@palliora.org/chainsdk";
+
+init({ pallioraWs: process.env.PALLIORA_WS ?? "wss://staging.manas-rpc.palliora.org" });
+
+const keyring = await getKeyring();
+const account = keyring.addFromUri("//Bob"); // dev-only, replace for real use
+
+const app = express();
+app.use(express.json());
+
+app.post("/v1/chat/completions", async (req, res) => {
+  try {
+    const { model, messages } = req.body;
+
+    const guardians = (await getGuardianAddress()).slice(0, 3).map((g) => g.address);
+    const result = await inferenceCompute(
+      {
+        input: JSON.stringify({ model, messages, stream: false }),
+        guardians,
+        fee: { amount: 0.05, computeRate: 0.00002 },
+        deadline: 0,
+      },
+      account,
+    );
+
+    const api = await getApi();
+    const match = await scanForBlockEvent(
+      api,
+      {
+        predicate: async (block, _event, phase) => {
+          if (!block || !phase.isApplyExtrinsic) return false;
+          const ext = block.block.extrinsics[phase.asApplyExtrinsic.toNumber()];
+          if (ext?.method?.section?.toLowerCase() !== "compute" || ext?.method?.method?.toLowerCase() !== "result") {
+            return false;
+          }
+          const emitted = "0x" + Array.from(ext.method.args[0]).map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+          return emitted === result.agreementId;
+        },
+      },
+      result.blockNumber + 1,
+      300,
+    );
+
+    const { decoded } = await fetchAndDecodeExtrinsic(match.blockNumber, match.extrinsicIndex ?? 0);
+    const answer = new TextDecoder().decode(
+      Buffer.from(decoded.method.args.contract.compute.input.Inline.data.slice(2), "hex"),
+    );
+
+    res.json({
+      id: result.agreementId,
+      object: "chat.completion",
+      model,
+      choices: [{ index: 0, message: { role: "assistant", content: answer }, finish_reason: "stop" }],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.listen(3000, () => console.log("Listening on :3000"));
+```
+
+Point any chat-completions-compatible client at `http://localhost:3000/v1` and it works without knowing what's coordinating it underneath.
+
+## Where this needs to grow up before production
+
+This minimal version is plaintext, uses a single dev signer for every request, blocks the HTTP response on a network round trip that can take a while, and has no retry or timeout handling beyond the 300-block window. A real service built this way typically needs:
+
+* **Per-user signing.** One shared dev key means every request is attributed to the same account. A real service signs each user's compute agreement with that user's own key.
+* **Privacy, if it matters for your use case.** This example never encrypts the prompt or the answer, see [Encrypted Compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md) for the threshold-encrypted path.
+* **Async handling.** A network round trip is not instant. Streaming responses, request queues, or a webhook-style callback all fit this better than a single blocking HTTP call for anything beyond a demonstration.
+* **Tool calls.** If the thing behind your endpoint needs to call external tools (web search, a calculator, another API), each tool call is its own Compute Contract in the same pattern, triggered by what the model returns, same as a normal chat-completions tool-calling loop, just with each step running as a Palliora compute agreement instead of a direct API call.
+
+See [Palliora AI](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/products/palliora-ai.md) for what a fuller version of this pattern looks like once all of that is addressed.

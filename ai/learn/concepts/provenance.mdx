@@ -1,0 +1,33 @@
+---
+title: "Provenance"
+---
+
+A provenance record is what a Palliora AI run leaves behind: which model ran, which tools were called, and a reference to the Compute Contract that coordinated each one. It's a byproduct of how Palliora AI already works, not a separate system bolted on afterward.
+
+## Why it exists
+
+An AI agent can act on someone's behalf: answering, searching, calling tools, writing code. Without a record of what actually happened, the only account of an agent's actions is a log the platform that ran it controls, and can edit. A provenance record is independent of that platform, because it's built from agreements recorded on Palliora's coordination ledger, not from the platform's own logs.
+
+## How it's built
+
+Every model call and every tool call in Palliora AI runs as its own [Compute Contract](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/compute-contracts.md): what ran, on what input, under what terms, agreed before execution starts. A single chat turn, or a longer agent run, is usually more than one of these: a model call, then a tool call the model asked for, then another model call with the tool's result folded in. Linking that chain of contracts together produces a provenance record for the whole turn, not just one step, using references already present in each contract rather than adding anything new to generate it.
+
+## What it tells you
+
+* **Which model ran.** The model identifier used in the underlying [Compute Contract](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/compute-contracts.md).
+* **Which tools were called**, and in what order, when a run involves more than one step.
+* **A reference to each agreement** that coordinated a step, so a claim about what ran can be checked against the coordination ledger instead of taken on trust.
+
+## Example
+
+A user asks the Palliora AI demo app, "What's the latest PALI price, and is it up this week?" Answering needs current data, so the run looks like this:
+
+1. **Model call 1.** The model reads the question and decides it needs a web search. This is a Compute Contract: model, prompt, and the decision to call a tool.
+2. **Tool call.** A web search runs as its own Compute Contract: which tool, what query, what came back.
+3. **Model call 2.** The search result goes back into the conversation. The model reads it and writes the final answer. Another Compute Contract, referencing the first two.
+
+The provenance record for this turn links all three: `gemma3:1b` ran twice, a web search tool ran once in between, and each step references the agreement that coordinated it. Anyone can check that against the coordination ledger. Nothing about the answer required trusting the platform's own account of what happened.
+
+## How it fits into Palliora
+
+Provenance is one application of [Compute Contracts](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/compute-contracts.md) and the [Guardian network](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/guardian.md), not a separate mechanism. Anything that already gets a Compute Contract, an AI run included, gets a provenance trail for free. See [Palliora AI](/ai) for how this fits into the product as a whole.

@@ -1,0 +1,54 @@
+---
+title: "Privacy model"
+---
+
+This page says what Palliora DeFi hides, what it does not, and what limits the privacy you get. Read it before you rely on the system.
+
+## What is hidden
+
+Inside the pool, a transfer shows no sender, no recipient, no token and no amount. An observer sees only that some notes were spent and some new notes were created. The values are encrypted and the proof is the only public evidence.
+
+## What is public
+
+| Event           | Public                                                              |
+| --------------- | ------------------------------------------------------------------- |
+| Registration    | Your public address and your shielded address, linked               |
+| Deposit         | Your wallet, the token and the amount                               |
+| Withdraw        | The receiving address, the token and the amount                     |
+| Transfer        | The fee token and amount, the number of notes, and when it happened |
+| Adaptor call    | The adaptor, the tokens in and out, and the payload                 |
+| Any transaction | The bundler or relayer that submitted it                            |
+
+Deposits and withdrawals touch your public wallet, so they are visible. Only the time spent inside the pool is private.
+
+## What limits your privacy
+
+**The size of the group you hide in.** Privacy depends on how many other people use the pool. If few people use it, or amounts are rare, an observer can often match a deposit to a withdrawal by amount and timing. More users and more activity make this harder. Early in the life of a pool, the group is small.
+
+**Amount and timing.** A distinctive amount, such as 1,247.83, can be matched from a deposit to a withdrawal. Round amounts and a gap between steps help.
+
+**Public steps.** A deposit shows your wallet and a withdrawal shows the receiving address. If you withdraw to a wallet that is linked to you, you undo the privacy of that path.
+
+**The relayer.** The relayer or bundler sees a transaction and when it arrived. It does not see who you are. Use one you trust, or run your own.
+
+**Registration.** Registration links your wallet to your shielded account in public. It lets people pay you. It does not show what you hold.
+
+## Where the privacy is conditional
+
+Privacy toward the public is not privacy toward the disclosure network. The revoker and a threshold of Decom guardians can de-anonymize any transaction. The revoker alone can recognise which registered account spent a note. The revoker also keeps what it de-anonymized on Palliora, as an encrypted report that it, or any third party it grants access to, can open. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure) and [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## Private Sub-accounts
+
+A Private Sub-account hides the link between you and a trading address. The position itself is public. Read [Private Sub-accounts](/defi/learn/concepts/private-sub-accounts) before you trade.
+
+## Practical advice
+
+1. Deposit round amounts.
+2. Leave time between deposit and withdrawal.
+3. Withdraw to an address that is not linked to your wallet.
+4. Keep your view key private, since it shows everything.
+
+## Next
+
+* [Quickstart](/defi/build/quickstart)
+* [Status and limits](/defi/reference/status-and-limits)

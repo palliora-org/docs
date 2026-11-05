@@ -1,0 +1,60 @@
+---
+title: "For agent-assisted developers"
+---
+
+More and more code against these docs is written by an AI coding agent on a person's behalf. This page says what an agent can rely on, where it must not guess, and what to read first.
+
+## What to rely on
+
+* Code blocks in the [Quickstart](/defi/build/quickstart) and in [Private Sub-accounts SDK](/defi/build/private-sub-accounts-sdk) were type-checked against the SDK source (version 1.4.3, with the old package names). They are illustrative: they need a data source, circuit files and addresses that you supply, and some need a HyperEVM build of the SDK. Blocks that were not checked say so.
+* Types and method names in the [SDK reference](/defi/build/sdk-reference) were read from the SDK source. When the package README and this repo disagree, trust this repo. If something still looks wrong, read the TypeScript source.
+* The adaptor example in [Integrate a DeFi protocol](/defi/build/integrate-a-protocol) compiles against the protocol repo with Solidity 0.8.24. It has not been run against a pool.
+* Known gaps are stated as gaps. For example, the services package does not give you working tree sources, and the published SDK does not list HyperEVM. Reading more will not find a hidden fix. The workaround on the page is the real workaround.
+
+## Do not guess
+
+An agent writing against Palliora DeFi gets these wrong when it guesses:
+
+| Topic                 | The trap                                                | The fact                                                                                                                                               |
+| --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Account seed          | Using a Poseidon hash of the signature                  | The app uses `keccak256` of the wallet signature, reduced to the field.                                                                                |
+| Signed text           | Rewording the message to say "Palliora"                 | The text still says "Veilnyx". A different text gives a different account.                                                                             |
+| EIP-712 domain        | Using `Palliora` as the domain name                     | The pool's domain name is still `Veilnyx`, version `1`.                                                                                                |
+| Adaptor interface     | Parallel arrays of ids and values                       | `handleAssets(AssetAmount[] inAssets, bytes payload)`, where `AssetAmount` is `{ uint24 assetId; uint256 value; }`.                                    |
+| Transaction type name | `CALL_ADAPTOR` in TypeScript                            | The SDK says `CALL_ADAPTER`. Solidity says `CALL_ADAPTOR`. Same value, 3.                                                                              |
+| Registration address  | Passing the shielded address in packed form to the pool | Registration signs the unpacked form: root address, then both public keys, as 32-byte words. Transactions use the 96-byte packed form.                 |
+| Deposit fee           | Setting a fee asset on a deposit                        | `feeAssetId` must be `0`.                                                                                                                              |
+| Spendable balance     | Counting queued notes                                   | Only notes already in the commitment tree are spendable. Settle first.                                                                                 |
+| Submitting            | Expecting the SDK to submit                             | The SDK builds, signs and proves. You submit.                                                                                                          |
+| Sub-accounts          | Reusing one, or funding gas from the user's wallet      | One position per Sub-account, and gas from the GasStation. See [Private Sub-accounts SDK](/defi/build/private-sub-accounts-sdk#rules-for-builders). |
+| Names                 | Renaming code identifiers in prose                      | In prose write "Private Sub-account". Keep `burner` and `Veilnyx` inside code and signed text.                                                         |
+
+## Read these first
+
+1. [`llms.txt`](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/defi/llms.txt) for the map of the repo. Fetch the raw file, not a rendered page.
+2. [`palliora-defi.skill.md`](/defi/build/palliora-defi.skill), a single dense file with the call pattern, the traps above and the common failures.
+3. [Quickstart](/defi/build/quickstart), then the [SDK reference](/defi/build/sdk-reference) before you invent a signature.
+4. [Troubleshooting](/defi/build/troubleshooting) before you add retry logic. Several failures, like a stale tree, are not fixed by retrying.
+
+## A starter prompt
+
+```
+Read llms.txt and build/palliora-defi.skill.md in the Palliora DeFi docs first.
+Then write a script that registers a shielded account, deposits test USDC,
+settles the deposit and withdraws part of it, using @palliora.org/defi-core on
+Sepolia. Follow the Quickstart. Tell me which services and files you could not
+supply instead of inventing them.
+```
+
+The last sentence matters. An agent that is told to flag gaps will flag the tree sources and the circuit files. One that is not told will invent them.
+
+## Safety rules for agents
+
+* Never print, log or send a spending key, a view key, a wallet signature that creates an account, or a Sub-account key.
+* Never run against mainnet with a real wallet without the person's go-ahead.
+* Do not publish a funding call twice. Check the outcome first.
+* Do not add analytics or error reporting that includes Sub-account addresses, indices or labels.
+
+## If you write docs for a project built on Palliora DeFi
+
+Reuse this repo's `STYLE.md`: simple language, no em dashes, code that runs or says plainly that it does not.

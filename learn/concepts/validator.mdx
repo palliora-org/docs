@@ -1,0 +1,41 @@
+---
+title: "Validator"
+---
+
+Validators keep the coordination ledger running correctly. They maintain this shared ledger, validate transactions, and participate in consensus to agree on the order and validity of blocks. A lot of what Palliora does happens privately, outside that shared record, but validators are what make those private results accountable: publicly and permanently.
+
+## Why Palliora needs Validators
+
+Any decentralized system needs a shared source of truth. Without validators, there's no reliable way to agree on which transactions happened, in what order, or whether the protocol's rules were followed. Contracts would be unenforceable and rewards disputable. Validators solve this by collectively maintaining and securing that shared record: once something is recorded and finalized, it can't be quietly changed or ignored.
+
+## What validators do
+
+Validators verify incoming transactions before including them in blocks, checking signatures, balances, and protocol rules. They propose new blocks and take part in a Byzantine fault tolerant consensus process to agree on block order and validity, so the network keeps working correctly even if some validators behave maliciously or go offline.
+
+Each validator keeps a full copy of the network's state, including account balances and contract data, so it can verify correctness independently rather than relying on other nodes. Once consensus is reached, validators attest to block validity and take part in finalization. After finalization, the recorded state is irreversible under normal conditions.
+
+## Staking and requirements
+
+Validators aren't trusted by reputation, they're trusted because they have economic stake and operational responsibility. To participate, a validator locks up tokens as collateral; stake size affects eligibility and can influence rewards. In return, validators earn staking rewards and a share of transaction fees.
+
+Because validators secure the foundation of the system, they're expected to meet strict operational standards: high uptime, enough hardware capacity, and secure key management (hardware security modules are recommended). Validators may also need to meet additional infrastructure or audit requirements the network defines.
+
+## Delegation
+
+Validators can accept stake delegated by other PALI holders and keep a commission on their rewards. See [Become a validator](/participate/become-a-validator).
+
+## Coordination ledger, not a destination chain
+
+Manas, Palliora's testnet, is the coordination ledger. It records agreements, results, disclosure requests and payments for Guardians and validators. Applications and their users stay on their own chains. See [Where Palliora runs](/learn/where-palliora-runs).
+
+## Rewards and penalties
+
+Validators earn rewards proportional to their stake and activity. A validator that misbehaves can have part of its stake slashed. Slashable behavior includes signing conflicting blocks, proposing invalid blocks, and extended downtime. This makes honest participation the rational strategy.
+
+## What validators don't do
+
+Validators don't handle private data. They don't decrypt inputs, run confidential computation, or decide who can access data, those responsibilities belong to Guardians, compute nodes and verifiers. They also don't define protocol policy or upgrades; their role is operational, not governance.
+
+## How Validators fit into Palliora
+
+Validators secure the foundation everything else is built on. Compute Contracts, Guardian coordination, rewards, penalties, and data commitments all rely on the shared ledger validators maintain. The Data Availability layer records commitments and proofs there, publicly, and validators make sure those records are correct and final. Without validators, Palliora would have no reliable execution history; with them, private computation and data sharing stay anchored to an immutable, public record.

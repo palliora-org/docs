@@ -1,0 +1,272 @@
+---
+title: "Quickstart"
+---
+
+In this page you create a shielded account, register it, deposit USDC, settle the deposit and withdraw part of it. You use the wallet path, so a wallet you control submits every transaction.
+
+The code on this page type-checks against SDK 1.4.3 (with the old package names). It is illustrative, not a script you can run as is. It needs a data source and circuit files that you supply, and values in square brackets that you fill in.
+
+## What you need
+
+* Node.js and a package manager.
+* A test wallet with some test ETH for gas and some test USDC on the test network you use.
+* The pool address, the paymaster address and the asset ids for the network. They are in [Network reference](/defi/reference/network-reference).
+* The circuit files for `register`, `transact21`, `transact22` and `treeUpdate` at least. Larger shapes (`transact23`, `transact42`, `transact44`) are needed when a transaction spends more notes or makes more outputs.
+* The pool ABI, from the protocol artifacts.
+
+## 1. Install
+
+```bash
+npm install @palliora.org/defi-core @palliora.org/defi-account \
+  @palliora.org/defi-services @palliora.org/defi-shared-types viem
+```
+
+## 2. Create the account
+
+A shielded account comes from one wallet signature. You hash the signature, cut it down to the field, and generate the keys from it.
+
+```ts
+import { createPublicClient, createWalletClient, http, keccak256, Hex } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { sepolia } from 'viem/chains';
+import { ShieldedAccount } from '@palliora.org/defi-account';
+
+// Illustrative: fill in the values in square brackets.
+const RPC_URL = '[RPC_URL]';
+
+// This is the text the Palliora DeFi app asks the wallet to sign. It still
+// says "Veilnyx". Keep it exactly as it is, or you get a different account
+// from the one the app shows for the same wallet.
+const ACCOUNT_MESSAGE =
+  'Sign this message to generate your Veilnyx shielded account.\n\n' +
+  'WARNING: Do not sign this message on any application not affiliated with Veilnyx.';
+
+const FIELD =
+  21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+
+const wallet = privateKeyToAccount(process.env.PRIVATE_KEY as Hex);
+const publicClient = createPublicClient({ chain: sepolia, transport: http(RPC_URL) });
+const walletClient = createWalletClient({
+  account: wallet,
+  chain: sepolia,
+  transport: http(RPC_URL),
+});
+
+const signature = await wallet.signMessage({ message: ACCOUNT_MESSAGE });
+const seed = BigInt(keccak256(signature)) % FIELD;
+const account = ShieldedAccount.generate(seed);
+```
+
+Anyone who gets the signature can rebuild the account, so treat it like a private key. See [Shielded accounts](/defi/learn/concepts/shielded-accounts).
+
+## 3. Create `Core`
+
+`Core` is the SDK's entry point. It needs five services. You give it a contract source, a notes source, a commitment tree source and an address tree source. The SDK builds the fifth, the address resolver, itself, and does not let you replace it.
+
+```ts
+import { Core, CoreCircuits } from '@palliora.org/defi-core';
+import { ContractSource, SimpleNotesSource } from '@palliora.org/defi-services';
+import { ITreeSource } from '@palliora.org/defi-shared-types';
+
+// Illustrative: you supply these.
+declare const circuits: CoreCircuits;
+declare const commitmentTreeSource: ITreeSource;
+declare const addressTreeSource: ITreeSource;
+
+const POOL = '[POOL_ADDRESS]' as Hex;
+const PAYMASTER = '[PAYMASTER_ADDRESS]' as Hex;
+const EXPLORER_API = '[EXPLORER_API_URL]';
+
+const contractSource = new ContractSource({
+  account,
+  pool: POOL,
+  publicClient: publicClient as any,
+  explorerApi: EXPLORER_API,
+});
+
+const core = new Core({
+  chainId: sepolia.id,
+  account,
+  rpc: publicClient as any,
+  explorerApi: EXPLORER_API,
+  contracts: { pool: POOL, paymaster: PAYMASTER, deployedBlock: 6_000_000n },
+  circuits,
+  services: {
+    contractSource,
+    notesSource: new SimpleNotesSource({
+      account,
+      contractSource,
+      pool: POOL,
+      publicClient: publicClient as any,
+    }),
+    commitmentTreeSource,
+    addressTreeSource,
+  },
+});
+```
+
+Two things to know about the services:
+
+* The two tree sources must read from the pool's events or from an index of them, and keep a Merkle tree in step with the pool. The commitment tree has depth 25. The address tree has depth 20. The Palliora DeFi app reads both from a subgraph. The `SimpleTreeSource` in the services package does not implement the `update` method that `Core` calls, so write your own `ITreeSource` for now. See [SDK reference](/defi/build/sdk-reference#services-you-supply).
+* `deployedBlock` is the block where the pool was deployed. It stops the address resolver scanning from the first block each time.
+
+The circuit chain list in the SDK covers Ethereum mainnet and Sepolia. It does not include HyperEVM in the published build. For HyperEVM, use a build that adds it: `[SDK_VERSION_WITH_HYPEREVM]`.
+
+## 4. Register
+
+Registration links your public address to your shielded address, so other people can send to you by address. You sign a typed message with your wallet, prove it in the register circuit, and send the proof to the pool.
+
+```ts
+import { concatHex, padHex, toHex } from 'viem';
+
+// The pool takes the unpacked address: the root address, then both public keys.
+const shieldedAddress = concatHex(
+  [
+    account.rootAddress,
+    account.signer.publicKey.x,
+    account.signer.publicKey.y,
+    account.viewer.publicKey.x,
+    account.viewer.publicKey.y,
+  ].map((v) => padHex(toHex(v), { size: 32 })),
+);
+
+const registerSignature = await walletClient.signTypedData({
+  domain: {
+    name: 'Veilnyx', // the pool's EIP-712 domain name, unchanged
+    version: '1',
+    chainId: sepolia.id,
+    verifyingContract: POOL,
+  },
+  types: {
+    RegisterAddress: [
+      { name: 'message', type: 'string' },
+      { name: 'shieldedAddress', type: 'bytes' },
+    ],
+  },
+  primaryType: 'RegisterAddress',
+  message: { message: 'Register Shielded Address', shieldedAddress },
+});
+
+const regData = await core.proveAddress(registerSignature, wallet.address);
+
+await walletClient.writeContract({
+  address: POOL,
+  abi: poolAbi, // illustrative: from the protocol artifacts
+  functionName: 'registerAddress',
+  args: [regData.toSolidityInput()],
+});
+```
+
+The second argument to `proveAddress` must be the address that produced the signature. The proof binds to it, and the pool rejects a mismatch. On Ethereum the pool also screens the sender and the signer against a sanctions list.
+
+## 5. Deposit
+
+A deposit moves tokens from your wallet into the pool and creates a note. First approve the pool to pull the tokens.
+
+```ts
+import { erc20Abi } from 'viem';
+import { TransactionType } from '@palliora.org/defi-shared-types';
+
+const USDC = '[USDC_ADDRESS]' as Hex;
+const amount = 10_000_000n; // 10 USDC, which has 6 decimals
+
+await walletClient.writeContract({
+  address: USDC,
+  abi: erc20Abi,
+  functionName: 'approve',
+  args: [POOL, amount],
+});
+
+const depositTx = await core.createTransaction(
+  {
+    type: TransactionType.DEPOSIT,
+    assetIds: [65538], // the pool's asset id for USDC on this network
+    values: [amount],
+    feeAssetId: 0, // a deposit carries no fee
+    to: account.shieldedAddress.pack(), // your own shielded address
+  },
+  { revokerId: 0, viaBundler: false },
+);
+
+const depositZtx = await core.proveTransaction(await core.signTransaction(depositTx));
+
+await walletClient.writeContract({
+  address: POOL,
+  abi: poolAbi,
+  functionName: 'transact',
+  args: [depositZtx.toSolidityInput()],
+});
+```
+
+The asset id `65538` is an example. Ids differ by network. Read them from [Network reference](/defi/reference/network-reference) or from `pool.getAsset`. The pool also enforces a minimum and a maximum deposit, and a cap on total value. Those figures are in [Status and limits](/defi/reference/status-and-limits).
+
+`createTransaction` picks the notes to spend, resolves the recipient, reads the revoker and builds the transaction. `signTransaction` signs it with your shielded key. `proveTransaction` runs the circuit and returns a `ZTransaction`.
+
+## 6. Settle
+
+The new note is queued. It joins the commitment tree after the next tree update. Anyone can submit the update, and you can do it yourself.
+
+```ts
+const treeUpdate = await core.proveTreeUpdate(true);
+
+await walletClient.writeContract({
+  address: POOL,
+  abi: poolAbi,
+  functionName: 'updateCommitmentTree',
+  args: [treeUpdate.toSolidityInput()],
+});
+
+const { current, pending } = await core.getBalances();
+console.log('spendable', current, 'pending', pending);
+```
+
+`getBalances` returns two maps from asset id to amount. `pending` holds notes still in the queue. `current` holds notes you can spend. A note can be spent only after it is in the tree. See [Notes and commitments](/defi/learn/concepts/notes-and-commitments).
+
+## 7. Withdraw
+
+A withdrawal spends notes and sends the tokens to a public address.
+
+```ts
+const withdrawTx = await core.createTransaction(
+  {
+    type: TransactionType.WITHDRAW,
+    assetIds: [65538],
+    values: [4_000_000n],
+    feeAssetId: 0,
+    to: wallet.address, // a public address, not a shielded address
+  },
+  { revokerId: 0, viaBundler: false },
+);
+
+const withdrawZtx = await core.proveTransaction(await core.signTransaction(withdrawTx));
+
+await walletClient.writeContract({
+  address: POOL,
+  abi: poolAbi,
+  functionName: 'transact',
+  args: [withdrawZtx.toSolidityInput()],
+});
+```
+
+Your wallet submitted this one, so the public can see which address sent the transaction. They still cannot see which notes it spent. To hide the sender, use the relayed path below.
+
+## Send privately to another account
+
+A transfer is the same call with `TransactionType.TRANSFER`. Set `to` to the recipient's public address, which the SDK resolves from the registration, or to their 96-byte packed shielded address.
+
+## Submit through a relayer
+
+For the relayed path, set `viaBundler: true` and name the fee asset. The fee is paid from your notes.
+
+| Network  | What submits                                                   | What you add                                                                                                                                                                                |
+| -------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ethereum | An ERC-4337 bundler, through the Gateway account and Paymaster | `viaBundler: true`, a non-zero `feeAssetId`, and `userOpFeeQuoteEth`                                                                                                                        |
+| HyperEVM | The relayer, which calls `pool.transact`                       | `relayed: true`, `paymaster` set to the relayer's address, and `relayFee`. These options are in `[SDK_VERSION_WITH_HYPEREVM]`, not in 1.4.3. See [Relayer API](/defi/build/relayer-api). |
+
+The SDK builds and proves the transaction in both cases. It does not build the user operation or call the relayer for you. The Palliora DeFi app does that in its own code. `quoteUserOpGasCostWithLatestBaseFee` in the core package helps you compute `userOpFeeQuoteEth`. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas) for how the fee is bound into the proof.
+
+## Next
+
+* [SDK reference](/defi/build/sdk-reference) for every type used above.
+* [Integrate a DeFi protocol](/defi/build/integrate-a-protocol) to call a protocol with `TransactionType.CALL_ADAPTER`.
+* [Troubleshooting](/defi/build/troubleshooting) if a step fails.

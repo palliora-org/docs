@@ -1,0 +1,81 @@
+---
+title: "Glossary"
+---
+
+Short definitions for terms used across these docs. Longer explanations are linked where one exists.
+
+**Accountable privacy**: One of Palliora's two inventions, with Compute Contracts. Data and identities are private by default, and are revealed only through a signed, publicly logged, Guardian-approved request, or by the user's own choice. See [Accountable privacy](/learn/concepts/accountable-privacy).
+
+**Agent**: The Explorer and SDK name for a published Compute Artifact that serves an interactive session. Not the same thing as an AI coding agent.
+
+**Agreement ID / Contract ID (CID)**: The unique identifier assigned to a Compute Contract once its required Guardians have signed it. Every later step (compute request, result, settlement) references this ID.
+
+**Artifact ID**: The permanent, publicly recorded reference generated when a [Compute Artifact](/learn/concepts/compute-artifacts) is registered. Any number of Compute Contracts can point at the same Artifact ID.
+
+**Builder / Requester**: Older names for the Publisher and the Retriever, still used on some diagrams.
+
+**Calculator**: Older name for a compute node, still used in the SDK and on palliora.org.
+
+**Compute Artifact**: The packaged, executable unit a Compute Contract runs: an image plus a manifest. Called an "agent" in the Explorer and "artefact" in some SDK function names. See [Compute Artifacts](/learn/concepts/compute-artifacts).
+
+**Compute Contract**: One of Palliora's two inventions, with Accountable Privacy. A publicly recorded agreement that defines a computation's inputs, execution mode, participants, disclosure rules and fees, locked before anything runs. See [Compute Contracts](/learn/concepts/compute-contracts).
+
+**Compute node**: A node that runs a Compute Artifact in the execution mode a contract specifies. Often the same physical machine as a Guardian.
+
+**Confidential compute**: Running a computation on sensitive data without exposing that data to whoever operates the machine, today through a TEE. See [Confidential compute](/learn/concepts/confidential-compute).
+
+**Coordination ledger**: The proof-of-stake ledger that records agreements, results, disclosure requests and payments. Manas on testnet. It is infrastructure for Guardians and validators, not a chain that applications move to.
+
+**Data Accountability Layer**:
+
+**Data Availability (DA)**: The guarantee that data committed to Palliora exists, hasn't been altered, and can be retrieved, without trusting a single storage provider. See [Data availability](/learn/concepts/data-availability).
+
+**Disclosure request**: A signed, publicly logged request to reveal a specific sealed record. It needs the approval of a Guardian quorum.
+
+**Economy protocol**:
+
+**Execution mode**: How confidential a contract's execution is: trusted, TEE, SMPC or FHE. Chosen per contract.
+
+**Guardian**: A node that signs contracts, holds a decryption key share, threshold-decrypts, reviews disclosure requests, and enforces a Compute Contract's terms as part of a quorum. See [Guardian](/learn/concepts/guardian).
+
+**KZG commitment**: A compact cryptographic proof that a piece of data exists and hasn't changed, without revealing the data itself. Used throughout Palliora's Data Availability layer.
+
+**Manas**: Palliora's public testnet. It runs the coordination ledger.
+
+**milliPALI**: The unit the CLI uses for token amounts. 1,000 milliPALI is 1 PALI.
+
+**PALI**: Palliora's native token, used to pay fees and staked by Guardians and validators as collateral. See [PALI token](/learn/concepts/pali-token).
+
+**Palliora AI**: Palliora's product for private, accountable compute for AI. In development on testnet. See [Palliora AI](/products/palliora-ai).
+
+**Palliora DeFi**: Palliora's product for private trading on any chain, accountable to regulators. Live on testnet on Hyperliquid and Ethereum. See [Palliora DeFi](/products/palliora-defi).
+
+**Private computer for the open internet**: How Palliora describes itself. Compute Contracts and Accountable Privacy, delivered by the Guardian network and encrypted data availability, plugged into the chains and platforms applications already use.
+
+**Provenance record**: A Palliora AI record of an AI agent run: which models and tools ran, with references to the agreements that coordinated them. See [Provenance](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/ai/learn/concepts/provenance.md).
+
+**Publisher**: The actor that uploads data or a Compute Artifact and sets the terms others pay to use it. See [Actors and roles](/learn/concepts/actors-and-roles).
+
+**Quorum**: The minimum number of Guardians that must cooperate before a threshold-protected action, like decryption or disclosure, can happen.
+
+**Retriever**: The actor that requests access to data or a computation's result, and pays the agreed fee.
+
+**Revoker**: The party, or parties, that can decrypt a sealed identity once a disclosure request is approved. Never a single party acting alone.
+
+**Selective disclosure (SeDe)**: The mechanism behind accountable privacy. Older material expands SeDe as "selective de-anonymization".
+
+**Shielded account**: A user's private account in a Palliora-powered app, created by signing a message, not a transaction.
+
+**Subscription contract**: A Compute Contract invoked repeatedly with fresh encrypted input until its budget or deadline runs out.
+
+**TEE (Trusted Execution Environment)**: A secure enclave in a processor where code runs isolated from the rest of the system, including the host operating system. The main mechanism behind confidential compute today.
+
+**Threshold encryption**: Splitting the ability to decrypt data across multiple parties, so no single one can decrypt it alone. See [Threshold encryption](/learn/concepts/threshold-encryption).
+
+**Validator**: A node that maintains the coordination ledger: ordering transactions, producing and finalizing blocks. See [Validator](/learn/concepts/validator).
+
+**Verifier**: The actor that checks a computation's result against the contract's own tests before settlement releases funds. See [Actors and roles](/learn/concepts/actors-and-roles).
+
+**View key**: A scoped, time-bound key a user shares to let someone see specific records, for example a tax adviser or auditor.
+
+**ZK nodes**:

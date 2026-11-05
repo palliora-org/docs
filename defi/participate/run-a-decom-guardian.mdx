@@ -1,0 +1,117 @@
+---
+title: "Run a Decom guardian"
+---
+
+How to configure, secure and check a guardian node. Read the whole page before you start. Some choices, such as how you store the keys, are hard to change after the key ceremony.
+
+A Decom guardian is not a Palliora Guardian. A Decom guardian holds a share of the key that de-anonymizes a shielded transaction. A Palliora Guardian holds a share of the key that protects a stored report. See [Participate](/defi/participate/participate).
+
+## What a node does
+
+1. **Takes part in key ceremonies.** It deals, checks and finalizes a share with the other nodes. See [Guardian key operations](/defi/participate/guardian-key-operations).
+2. **Holds a sealed share.** The share is encrypted on disk with a key that only this node can get.
+3. **Answers permit requests.** The revoker asks for a permit. The node checks the request and returns a partial decryption in the reply.
+4. **Stays reachable.** The other nodes and the revoker must be able to call it.
+
+## Secrets
+
+| Secret                                           | Count             | Keep it in                      |
+| ------------------------------------------------ | ----------------- | ------------------------------- |
+| Node key, an EVM key that is the node's identity | One for each node | A secret store, for each node   |
+| Master key, which seals the share on disk        | One for each node | A secret store, for each node   |
+| Admin wallet, which starts ceremonies            | One               | A hardware wallet or a multisig |
+
+Rules:
+
+* Make every secret fresh for the network you run. Never reuse a test network key.
+* Generate secrets on the host or in the secret store, and move them from machine to machine. Never send a secret in chat, a ticket or an email.
+* The master key must be different on every node. One shared master key, together with the sealed share files, would rebuild the group key and undo the threshold.
+* Fetch secrets at start and keep them in memory. Do not write them to disk or put them in a compose file.
+
+Sealing protects the share at rest. If someone steals a disk snapshot, they get only the sealed share. It does not protect a running host that an attacker controls, because the node can fetch its own key. That case is what the threshold is for.
+
+## Configure the node
+
+A node is configured with environment variables.
+
+| Variable              | Meaning                                                                                                           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `POSITION`            | The node's 1-based position in the committee                                                                      |
+| `NODE_KEY`            | The node's EVM private key. Its address is the node's identity.                                                   |
+| `GUARDIAN_MASTER_KEY` | The key that seals the share on disk                                                                              |
+| `GUARDIAN_SHARE_FILE` | Where the sealed share is stored. Put it on a volume.                                                             |
+| `PORT`                | The port the node listens on                                                                                      |
+| `ADVERTISE_URL`       | The URL the other nodes use to reach this one                                                                     |
+| `ADMIN_ADDRESSES`     | Wallets allowed to start a ceremony. **Set it.**                                                                  |
+| `REQUEST_CONTRACT`    | The disclosure request manager. See [Network reference](/defi/reference/network-reference#disclosure-network). |
+| `REQUEST_RPC`         | The RPC the node reads the request contract from                                                                  |
+| `POOL_CONTRACT`       | The pool the node reads transactions from                                                                         |
+
+If `ADMIN_ADDRESSES` is not set, anyone who can reach the node can start a ceremony. The node writes a warning. Use that only for local tests.
+
+The node needs an RPC that can read past logs. Keep the RPC key on the server. Do not put it in client code. The node's code and image are at [github.com/veilnyx/decom](https://github.com/veilnyx/decom/).
+
+## Network access
+
+* Open the node's port only to the other nodes and to the revoker host. Do not make it public.
+* Restrict ceremony triggers to the admin host. Add mutual TLS where you can.
+* Keep SSH closed to the world. Allow it from admin addresses only, or use a session manager and close it.
+
+## Routes
+
+| Node     | Route                                | Used by                 | Purpose                                                                                  |
+| -------- | ------------------------------------ | ----------------------- | ---------------------------------------------------------------------------------------- |
+| Guardian | `GET /identity`                      | Anyone who can reach it | The node's position, address, encryption key and URL                                     |
+| Guardian | `POST /dkg/:round`                   | Other nodes             | Signed messages of a ceremony round                                                      |
+| Guardian | `POST /ceremony/start`               | The admin               | Starts a ceremony. Needs a signed trigger.                                               |
+| Guardian | `GET /ceremony/result`               | The admin               | The group key the node ended with                                                        |
+| Guardian | `GET /ceremony/commitments/:groupId` | The admin               | The public commitments of a group, which a new node needs to check dealers               |
+| Guardian | `GET /ceremony/shares`               | The admin               | The groups the node holds a share for, with epoch and threshold. Never the share itself. |
+| Guardian | `POST /permit`                       | The revoker             | Returns a partial decryption for a valid request                                         |
+| Revoker  | `GET /health`                        | The operator            | Status, with the revoker's public key                                                    |
+| Revoker  | `POST /decrypt`                      | The app                 | Asks the guardians and combines their answers                                            |
+
+Every message between nodes is signed with the sender's node key. A node accepts a message only if it is fresh, comes from a registered node and has not been seen before. It drops junk before it does any costly work.
+
+## What a node checks on a permit request
+
+When the revoker calls `/permit`, the node checks four things.
+
+1. The request is fresh, no older than 60 seconds.
+2. The request exists in the request contract and names the transaction. The node reads this itself from the network, not from an index.
+3. The signer is the registered revoker for the group.
+4. The group is active.
+
+If all four hold, the node computes its partial decryption and returns it in the reply. Nothing is posted to the network. If the pool owner deactivates a group, the node refuses every request for it, including old ones.
+
+The node does not weigh the reason for a request. The people who run the revoker decide who may ask. The revoker's report of what it de-anonymized is kept on Palliora DA and is not visible to the guardians. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## Check that it works
+
+* Call `GET /identity` on every node. Each should answer with its address.
+* Read `GET /ceremony/shares` on each node. Each should list the group, the epoch and the threshold.
+* Read the revoker's `GET /health`. It should show the expected revoker public key and the threshold, which is discovered from the guardians.
+* Run one real de-anonymization end to end before you open the group to users.
+
+## Backups and recovery
+
+If a node is lost, the group recovers with a ceremony that moves the shares to a replacement node. It needs at least the threshold of the other nodes to be up. See [Guardian key operations](/defi/participate/guardian-key-operations#add-or-remove-nodes). No secret leaves the nodes.
+
+If you also back up sealed shares:
+
+* Back up after every ceremony. A share changes with every refresh, and an old backup does not combine with newer shares.
+* Keep each node's backups in a separate store with a separate key. No one account should be able to open `t` or more shares.
+* Test the restore before you need it.
+
+## Checklist
+
+* [ ] No test network secret is reused.
+* [ ] Every node has its own node key and its own master key.
+* [ ] Secrets are fetched at start and never written to disk.
+* [ ] `ADMIN_ADDRESSES` is set on every node.
+* [ ] Node ports are closed to the public.
+* [ ] One real de-anonymization was run end to end.
+
+## Next
+
+* [Guardian key operations](/defi/participate/guardian-key-operations)

@@ -1,0 +1,52 @@
+---
+title: "Relaying and gas"
+---
+
+Every transaction has a sender, and the sender pays gas. If you paid gas from your own wallet, your wallet would sit next to your private transaction and undo the privacy. Relaying fixes this. Someone else submits your transaction and pays the gas, and you repay them from your shielded balance.
+
+## Account abstraction on Ethereum
+
+On Ethereum, Palliora DeFi uses ERC-4337, also called account abstraction. Your transaction travels as a user operation instead of a normal transaction.
+
+| Part       | What it does                                                                                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Gateway    | A contract that acts as the account for the user operation. It wraps your shielded transaction. A proof authorizes it, so no signature from a wallet is needed. |
+| Bundler    | A service that collects user operations and submits them to the network.                                                                                        |
+| Paymaster  | A contract that pays the gas in ETH and takes its fee in a token you hold in the pool.                                                                          |
+| EntryPoint | The standard ERC-4337 contract that runs user operations. The pool uses version 0.7.                                                                            |
+
+Your wallet is not involved. The visible sender is the bundler.
+
+## How the fee works
+
+You pay the fee from your shielded balance, inside the transaction.
+
+1. The app quotes the gas cost at the current gas price.
+2. The paymaster turns that cost into a token amount, using a price feed for the token. The pool accepts only tokens that have a registered price feed.
+3. The transaction spends that fee amount from your notes and pays it to the paymaster. The fee token and amount become public. Nothing else does.
+4. The paymaster address is bound into the proof. A different paymaster cannot claim the fee.
+
+The pool also has a withdrawal fee, set in basis points. See [Fees](/defi/reference/fees) for the current values.
+
+## What you pay gas for yourself
+
+A deposit moves tokens from your wallet, so your wallet is public in it. You pay its gas from your wallet. A deposit carries no fee.
+
+## Relaying on HyperEVM
+
+HyperEVM has no bundler. A relayer service does the same job. It submits the proven transaction to the pool directly, and the pool pays it from a fee credit inside the pool. The fee is a flat amount in USDC. See [Relayer API](/defi/build/relayer-api) and [Fees](/defi/reference/fees).
+
+|              | Ethereum                          | HyperEVM                                   |
+| ------------ | --------------------------------- | ------------------------------------------ |
+| Submitted by | Bundler through ERC-4337          | Relayer service                            |
+| Gas paid by  | Paymaster, repaid from your notes | Relayer, repaid from the pool's fee credit |
+| Fee token    | A token with a price feed         | USDC                                       |
+
+## What relaying hides, and what it does not
+
+Relaying hides your wallet as the sender. The bundler or relayer still sees the transaction data and when it arrived. The data is a proof and encrypted values, so it does not show who you are. For this reason, use a bundler or relayer you are comfortable with, or run your own.
+
+## Next
+
+* [Adaptors](/defi/learn/concepts/adaptors)
+* [Privacy model](/defi/learn/concepts/privacy-model)

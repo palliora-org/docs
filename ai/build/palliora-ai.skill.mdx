@@ -1,0 +1,72 @@
+---
+title: "Skill file, downloadable"
+description: "Use when writing code that calls a model on Palliora AI, plain or threshold-encrypted inference, or wraps Palliora behind a chat-completions-compatible endpoint. Covers inferenceCompute, result pollin"
+---
+
+A condensed map for coding agents. The full pages are in this repo under `ai/build/` and `build/guides/`. If this file is wrong, the pages and the SDK source win. For the chain SDK generally, see [`palliora.skill.md`](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/coding-agents/palliora.skill.md).
+
+## Facts you must not guess
+
+* Guardians run a small, curated Ollama model set, not an arbitrary one: `gemma3:1b`, `deepseek-r1:1.5b`, `llama3.2:1b`, `qwen3:0.6b`. Any other model name submits fine and fails at execution.
+* `inferenceCompute` does not return the answer. It returns `{ agreementId, blockNumber }`. The answer lands later as a separate `compute.result` extrinsic you poll for with `scanForBlockEvent`.
+* Poll with a 300-block window, not the SDK's 20-block default. Real inference is slower than a typical chain transaction.
+* `staking.guardians(address).pubKey` is a guardian's sr25519 **signing** key, not its Ed25519 **result-decryption** key. Using it with `gen_shared_key` throws. There is no dynamic public lookup for the decryption key yet; use a known-good out-of-band map.
+* `//Bob` is the dev-only account used in every example. It's shared and unsuited to anything real.
+
+## Plain inference, the default starting point
+
+```ts
+import { getGuardianAddress, inferenceCompute, getApi, scanForBlockEvent, fetchAndDecodeExtrinsic } from "@palliora.org/chainsdk";
+
+const guardians = (await getGuardianAddress()).slice(0, 3).map((g) => g.address);
+
+const result = await inferenceCompute(
+  { input: JSON.stringify({ model: "gemma3:1b", messages: [{ role: "user", content: "..." }], stream: false }),
+    guardians, fee: { amount: 0.05, computeRate: 0.00002 }, deadline: 0 },
+  account,
+);
+// result = { blockNumber, index, hash, agreementId }
+
+const api = await getApi();
+const match = await scanForBlockEvent(api, {
+  predicate: async (block, _event, phase) => {
+    if (!block || !phase.isApplyExtrinsic) return false;
+    const ext = block.block.extrinsics[phase.asApplyExtrinsic.toNumber()];
+    if (ext?.method?.section?.toLowerCase() !== "compute" || ext?.method?.method?.toLowerCase() !== "result") return false;
+    const emitted = "0x" + Array.from(ext.method.args[0]).map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+    return emitted === result.agreementId;
+  },
+}, result.blockNumber + 1, 300);
+
+const { decoded } = await fetchAndDecodeExtrinsic(match.blockNumber, match.extrinsicIndex ?? 0);
+const answer = new TextDecoder().decode(Buffer.from(decoded.method.args.contract.compute.input.Inline.data.slice(2), "hex"));
+```
+
+Full runnable version: [Call a model](/ai/build/call-a-model).
+
+## Wrapping it as a chat-completions-compatible endpoint
+
+Same call pattern, triggered from `POST /v1/chat/completions` using the request body's `model` and `messages` directly, with the answer wrapped back into an chat-completions-shaped response object. Full example: [Build a chat-completions-compatible service](/ai/build/chat-completions-service).
+
+## Threshold-encrypted (private) inference
+
+Needs a 3-guardian group and several crypto helpers (`createGuardianGroupAndWatch`, `testCrypt`, `gen_stretched_key`, `encrypt`/`decrypt`, `gen_shared_key`). See [Encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md) for the full worked example before attempting this from scratch, the parameter shapes are large and order-sensitive.
+
+TEE execution (hiding the prompt from the compute node's own operator, not just from other participants) is a separate, additional setting from encryption, live on testnet on Guardians with Intel TDX hardware. See [Confidential compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/confidential-compute.md).
+
+## Common failures
+
+| Message                                                 | Fix                                                                                                              |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| No `compute.result` within the wait window              | Give it 300 blocks, not the SDK's 20-block default.                                                              |
+| `bad point: invalid y coordinate` from `gen_shared_key` | Passed a sr25519 key where an Ed25519 key was expected. Use the known-good `nodePub` map, see Encrypted Compute. |
+| Model submits but execution fails                       | Model name isn't in the curated Ollama set.                                                                      |
+| `InsufficientFreeBalance`                               | `fees` below the floor, or balance too low. Call `estimateMinFee`.                                               |
+
+Full chain-wide table: [Troubleshooting](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/reference/troubleshooting.md).
+
+## Do not
+
+* Do not ship the dev-only `//Bob` account into anything meant to run for real users.
+* Do not invent a `nodePub` value for a guardian you haven't confirmed against a working decrypt.
+* Do not use em dashes in docs or comments you write for this project.

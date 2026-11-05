@@ -1,0 +1,87 @@
+---
+title: "Indexer API Reference"
+---
+
+`@palliora.org/chainsdk` ships a typed, read-only client for `@statescan/indexer`, the REST API behind Palliora's Explorer. Use it for anything you'd otherwise have to reconstruct by scanning blocks yourself: listing published artifacts, checking a contract's status, pulling a transfer history.
+
+## Configuring the client
+
+```ts
+import { IndexerClient } from "@palliora.org/chainsdk";
+
+const client = new IndexerClient({ baseUrl: "http://localhost:5020" });
+```
+
+The default base URL is `http://localhost:5020`, a local development indexer. There is no independently confirmed public indexer endpoint for Manas at the time of writing, see [Network reference](/build/reference/network-reference) for what's actually confirmed. If you need indexer access without running your own instance, confirm a current URL with the Palliora team rather than assuming one.
+
+Don't include `/api` in `baseUrl`, every path already includes it, a `baseUrl` ending in `/api` would produce `/api/api/...` and 404.
+
+## Functions by area
+
+**Blocks and extrinsics**
+
+| Function                                                                        | Returns                         |
+| ------------------------------------------------------------------------------- | ------------------------------- |
+| `getBlocks(client, { page, page_size })`                                        | Paginated block list with stats |
+| `getExtrinsics(client, { signed_only?, ... })`                                  | Extrinsic list                  |
+| `getExtrinsic(client, id)`                                                      | A single extrinsic              |
+| `getCall(client, id)`, `getCallMetadata(client, id)`, `getCallArgs(client, id)` | Call-level detail               |
+
+**Contracts and compute**
+
+| Function                                                                                                  | Returns                                                                                           |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `getContracts(client, query?)`                                                                            | Compute contracts list                                                                            |
+| `getContract(client, id)`                                                                                 | A single contract                                                                                 |
+| `getCompute(client, query?)`                                                                              | Compute step records                                                                              |
+| `getResults(client, { contractId })`                                                                      | Results for a contract                                                                            |
+| `getResult(client, id)`                                                                                   | A single result                                                                                   |
+| `getContractFlow(client, contractId)`                                                                     | The full phase-by-phase lifecycle of one contract: `flow.computes`, `flow.results`, `flow.phases` |
+| `deriveContractStatus(...)`, `buildContractPhases(...)`, `normalizeComputes(...)`, `resultToCompute(...)` | Helpers for interpreting flow data, used internally by `getContractFlow`                          |
+
+**Artifacts**
+
+| Function                                                                                  | Returns                                                   |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `getArtefacts(client, query?)`                                                            | Published artifacts                                       |
+| `getArtefact(client, id)`                                                                 | A single artifact                                         |
+| `getArtefactAccess(client, id, query?)`                                                   | Access records for an artifact                            |
+| `getArtefactContracts(client, id)`                                                        | Contracts that reference this artifact                    |
+| `getArtefactsByStoreType(client, storeType)`                                              | Filtered by store type (`Model`, `Agent`, `Dataset`, ...) |
+| `getDatasets(client)`, `getModels(client)`, `getAgents(client)`, `getExecutables(client)` | Shorthand filters over `getArtefacts`                     |
+| `getArtefactFlow(client, artefactId)`                                                     | An artifact's full usage lifecycle                        |
+| `isArtefactUsage(doc, artefactId)`                                                        | True if a given document references this artifact         |
+
+**Guardians**
+
+| Function                            | Returns           |
+| ----------------------------------- | ----------------- |
+| `getGuardianGroups(client, query?)` | Guardian groups   |
+| `getGuardianGroup(client, id)`      | A single group    |
+| `getGuardians(client, query?)`      | Guardian list     |
+| `getGuardian(client, id)`           | A single guardian |
+
+**Accounts, transfers, and blobs**
+
+| Function                                                 | Returns                                                                             |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `getAddresses(client, query?)`, `getAddress(client, id)` | Account records                                                                     |
+| `getTransfers(client, query?)`                           | Transfer history                                                                    |
+| `getBlob(client, blockHeight)`                           | A stored blob by block height, see [Store data](/build/guides/store-data)        |
+| `getAccess(client, query?)`                              | **Deprecated**, superseded by `getArtefactAccess`. Kept for backward compatibility. |
+
+## Example: check what a model's been used for
+
+```ts
+import { IndexerClient, getModels, getArtefactContracts } from "@palliora.org/chainsdk";
+
+const client = new IndexerClient({ baseUrl: process.env.INDEXER_URL ?? "http://localhost:5020" });
+
+const { data: models } = await getModels(client);
+const { data: usages } = await getArtefactContracts(client, models[0].id);
+console.log(`${models[0].name} has been referenced by ${usages.length} contract(s)`);
+```
+
+## When to use this instead of the network directly
+
+The indexer is for reading history and current state efficiently. It's not a substitute for the network itself, don't rely on it to confirm a transaction succeeded in time-sensitive code, query the network directly (`scanForBlockEvent`, `fetchAndDecodeExtrinsic`, see [SDK Reference](/build/reference/sdk-reference)) for that instead, the indexer may lag the network's head by some margin depending on how it's run.

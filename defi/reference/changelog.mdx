@@ -1,0 +1,52 @@
+---
+title: "Changelog"
+---
+
+Changes to the Palliora DeFi protocol and product that matter to users and integrators, newest first. For what is true now, use [Status and limits](/defi/reference/status-and-limits) and [Network reference](/defi/reference/network-reference).
+
+## 2026
+
+### October
+
+**2026-10-06. Ethereum pool upgrade (contract revision 2).** The Ethereum pool runs a new implementation. The pool address did not change. This upgrade changes what a client must do.
+
+* A deposit must carry a fee of 0.
+* Nullifiers, commitments and memo words must be below the field size.
+* A tree update of size zero reverts.
+* The pool screens the transaction origin and the registration signer against the sanctions list, as well as the sender.
+* The Ethereum Paymaster was replaced. The two earlier Paymasters are retired. The Paymaster address is part of the fee data and the proof binds it, so a client must use the current one. See [Network reference](/defi/reference/network-reference).
+
+### September
+
+**2026-09-30. HyperEVM mainnet pool deployed.** The pool was deployed from the same code as the Ethereum implementation above. HyperEVM has no ERC-4337 bundler, so a relayer submits transactions. Fees are a flat amount in USDC. See [Relayer API](/defi/build/relayer-api) and [Fees](/defi/reference/fees).
+
+### July
+
+**2026-07-30. Ethereum pool and request manager deployed.** The Ethereum pool went live in block 25,647,575. The disclosure request manager was deployed in block 25,648,509.
+
+**2026-07-17. ABDK report 1.2.** The final version of the audit report. See [Security and audits](/defi/reference/security-and-audits).
+
+**2026-07-15. ZK ceremony finalised.** The proving keys come from this ceremony. See [ZK ceremony](/defi/reference/zk-ceremony).
+
+## Before mainnet
+
+* **Disclosure.** A step where guardians approved a request in a transaction was removed before mainnet. A guardian now answers a request directly, with a permit sent to the revoker, so partial decryptions are never published. The setup of the guardians' key is a verifiable DKG with no leader. The revoker keeps its report of what it de-anonymized on Palliora DA. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure) and [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## Compared with older documentation
+
+Older Veilnyx pages say some things that are no longer true. This table lists them.
+
+| Older pages said                                             | Today                                                                                                                                             |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Palliora DeFi is in private beta before mainnet.             | It is live on Ethereum and on HyperEVM. See [Status and limits](/defi/reference/status-and-limits).                                            |
+| A withdrawal costs about 5 bps.                              | The pool's withdrawal fee is 0 bps. See [Fees](/defi/reference/fees).                                                                          |
+| Guardians vote and click "Give Permission" in a transaction. | There is no such step. A guardian answers the revoker directly.                                                                                   |
+| It runs on OP Sepolia and Sepolia.                           | The test networks are Sepolia and HyperEVM testnet. OP Sepolia is not deployed.                                                                   |
+| Transfers are 100% anonymous.                                | Privacy depends on how many people use the pool. Deposits and withdrawals are public. See [Privacy model](/defi/learn/concepts/privacy-model). |
+| Shield Score rewards and Privacy Makers and Takers.          | They are not part of the product.                                                                                                                 |
+| Uniswap is live. Lido and Aave are coming.                   | On Ethereum, Uniswap, Aave, Lido and Morpho are live. See [Network reference](/defi/reference/network-reference).                              |
+
+## Next
+
+* [FAQ](/defi/reference/faq)
+* [Rename map](/defi/reference/rename-map)

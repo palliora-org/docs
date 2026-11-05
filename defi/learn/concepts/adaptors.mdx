@@ -1,0 +1,65 @@
+---
+title: "Adaptors"
+---
+
+An adaptor lets a private transaction use another protocol, such as a swap, a loan or a stake. The other protocol does not change. You only add a small contract that sits between the pool and that protocol.
+
+## The idea
+
+Most DeFi actions turn one token into another.
+
+* Swapping ETH for USDC on Uniswap turns ETH into USDC.
+* Supplying USDC on Aave turns USDC into a token that earns interest.
+* Staking ETH on Lido turns ETH into stETH, then wstETH.
+
+An adaptor does that one conversion. It takes the tokens in, calls the protocol, and returns the tokens out.
+
+## Interface
+
+```solidity
+// From the protocol source. Illustrative: shown for reading, not compiled here.
+struct AssetAmount {
+    uint24 assetId;
+    uint256 value;
+}
+
+abstract contract IAdaptor {
+    function handleAssets(
+        AssetAmount[] calldata inAssets,
+        bytes calldata payload
+    ) external payable virtual returns (AssetAmount[] memory outAssets);
+}
+```
+
+`inAssets` are the tokens the transaction sends in. `payload` is whatever the adaptor needs to know, such as a slippage limit. `outAssets` are the tokens it returns.
+
+## How a call runs
+
+1. You build a transaction of the adaptor call kind. It names the adaptor, the tokens to send, and the payload. The proof spends your notes.
+2. The pool checks the proof and releases the tokens to the adaptor handler.
+3. The handler calls the adaptor with `delegatecall`, so the adaptor runs with the handler's balance.
+4. The adaptor calls the other protocol and returns the output tokens.
+5. The handler checks each output token is active in the pool and that it holds at least the amount returned. It then lets the pool pull the output.
+6. The pool creates a note for each output token. The notes belong to the refund address you named in the transaction. A memo on each note lets only you recover its blinding, so only you can spend it. The amounts are public, because the pool builds the commitments from what the adaptor returned.
+
+The tokens in and out, and the payload, are public. Who made the call, and who owns the new notes, is not.
+
+## What an adaptor is
+
+* **Stateless.** It keeps no balances. It holds immutable addresses of the protocol it talks to.
+* **Registered.** Only the pool owner can register an adaptor. An unregistered adaptor is rejected.
+* **Limited.** The handler accepts only output tokens that are active in the pool and amounts it actually holds.
+
+## Which adaptors exist
+
+The protocol has adaptors for Aave v3, Uniswap v3, Curve, Ethena, Lido, Morpho vaults, 1inch v6, Rocket Pool and Beefy. Which are live differs by network. See [Network reference](/defi/reference/network-reference).
+
+On HyperEVM, a different adaptor funds a Private Sub-account straight from the pool. See [Private Sub-accounts](/defi/learn/concepts/private-sub-accounts).
+
+## Write your own
+
+To add private access to a protocol, write an adaptor, then ask for it to be registered. See [Integrate a DeFi protocol](/defi/build/integrate-a-protocol).
+
+## Next
+
+* [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure)

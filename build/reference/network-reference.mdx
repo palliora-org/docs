@@ -1,0 +1,36 @@
+---
+title: "Network Reference"
+---
+
+Every endpoint, in one place, instead of repeated inline across other pages.
+
+## Manas (public testnet)
+
+| What                    | Value                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------- |
+| Network RPC (WebSocket) | `wss://staging.manas-rpc.palliora.org`                                                       |
+| Explorer                | [manas.palliora.org](https://manas.palliora.org)                                             |
+| Faucet                  | In-app, via the Explorer's **Faucet** button, see [Get test tokens](/use/get-test-tokens) |
+
+`wss://staging.manas-rpc.palliora.org` is the endpoint used throughout this documentation and confirmed working end to end: guardian coordination, threshold decryption, and real inference have all been tested against it directly. `@palliora.org/chainsdk`'s own default, `wss://manas-rpc.palliora.org` (no `staging.` prefix), has not been independently confirmed for the full guardian/compute flow, pass the staging URL explicitly to `init()` rather than relying on the SDK's default.
+
+## Indexer
+
+The SDK's `IndexerClient` (see [Indexer API reference](/build/reference/indexer-reference)) defaults to `http://localhost:5020`, a local development indexer, not a public endpoint. `https://indexer.palliora.org` shows up as a commented-out example value in more than one sample project's config, but it has not been independently confirmed live. If you need indexer access, run your own instance of `@statescan/indexer` against Manas, or confirm a public URL with the Palliora team before depending on one in production code.
+
+## Testnet performance
+
+| Metric                  | Value                                      |
+| ----------------------- | ------------------------------------------ |
+| Block time              | 6 seconds                                  |
+| Max block size          | 4 MB                                       |
+| Throughput              | About 700 transactions per second          |
+| Finality                | 15 to 20 seconds (BABE-GRANDPA)            |
+| Guardian onboarding     | New clients can join every 4-hour interval |
+| DA raw storage per node | 300 GB (testnet configuration)             |
+
+These figures describe Manas's general block production and DA configuration, see [How Palliora Works](/learn/how-it-works) for context. Separately, the compute fee model's own genesis parameters are quoted elsewhere (in `palliora-sdk`'s `CHAIN-RULES.md`) using a 500ms block time for a worked fee example, a different number than the 6-second figure above. Both are genesis or testnet values from different parts of the system, not necessarily the same figure, and both sources warn these are queryable, mutable network parameters, not constants, confirm against the live network (`getFeeParams()`, see [Fees and Incentives](/learn/concepts/fees-and-incentives)) rather than hard-coding either.
+
+## Where these facts come from
+
+Network endpoint and performance figures here are drawn from this workspace's own direct, verified testing against Manas, and from `palliora-sdk`'s own README and `CHAIN-RULES.md`. If you find one of these values has drifted, [SDK Reference](/build/reference/sdk-reference) and `palliora-sdk`'s source are the way to re-confirm it.

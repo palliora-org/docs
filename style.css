@@ -1,0 +1,18 @@
+/* GitBook-style buttons and columns carried over from docs.palliora.org */
+.gb-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  text-decoration: none !important;
+  border: 1px solid rgb(52 109 219);
+  margin: 0.25rem 0;
+}
+.gb-button-primary { background: rgb(52 109 219); color: #fff !important; }
+.gb-button-primary:hover { background: rgb(57 115 225); }
+.gb-button-secondary { background: transparent; color: rgb(52 109 219) !important; }
+.dark .gb-button-secondary { color: rgb(167 193 239) !important; border-color: rgb(80 139 252); }
+.gb-columns { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; }
+.gb-column { flex: 1 1 0%; min-width: 12rem; }

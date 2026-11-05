@@ -1,0 +1,55 @@
+---
+title: "Concepts"
+---
+
+Palliora has two inventions: **Compute Contracts** and **Accountable Privacy**. Start with those two. The rest of this section covers the pieces that deliver them.
+
+<CardGroup cols={2}>
+  <Card title="Compute Contracts" href="/learn/concepts/compute-contracts">
+    Defines what data is used, how computation runs, who can see the results, and how participants get paid. If you are building on Palliora, this is the best place to start.
+  </Card>
+  <Card title="Accountable Privacy" href="/learn/concepts/accountable-privacy">
+    How data and identities stay sealed by default, and the due process that can reveal a specific record. No master key, no silent access.
+  </Card>
+  <Card title="Guardian" href="/learn/concepts/guardian">
+    A neutral node that coordinates data access and computation across the network. Guardians work as a group, so no single node can access data or change a contract on its own.
+  </Card>
+  <Card title="Compute Artifacts" href="/learn/concepts/compute-artifacts">
+    The packaged, executable unit a Compute Contract actually runs: a model, function, or workload, published once and referenced by any number of contracts.
+  </Card>
+  <Card title="Actors and Roles" href="/learn/concepts/actors-and-roles">
+    Who takes part in a Compute Contract: Publisher, Retriever, Guardian, compute node, Verifier, and Validator, and what each one is paid for.
+  </Card>
+  <Card title="Validator" href="/learn/concepts/validator">
+    Validators maintain the coordination ledger, confirm transactions, and agree on the order of blocks. They keep the public record that everything else in Palliora depends on.
+  </Card>
+  <Card title="Confidential Compute" href="/learn/concepts/confidential-compute">
+    Runs computation on sensitive data without exposing it to the machine or anyone operating it, using secure processor enclaves called TEEs. Only the outputs allowed by the contract are ever revealed.
+  </Card>
+  <Card title="Data Availability" href="/learn/concepts/data-availability">
+    Makes sure that data stored on the network can always be retrieved and has not been changed. Uses erasure coding and compact proofs so nodes can verify data exists without downloading all of it.
+  </Card>
+  <Card title="Threshold Encryption" href="/learn/concepts/threshold-encryption">
+    Splits the ability to decrypt data across multiple Guardian nodes so no single party can unlock it alone. A minimum number of Guardians must cooperate before any protected data can be accessed.
+  </Card>
+  <Card title="Fees and Incentives" href="/learn/concepts/fees-and-incentives">
+    How a Compute Contract is priced, who gets paid when, and what keeps every actor honest.
+  </Card>
+  <Card title="PALI Token" href="/learn/concepts/pali-token">
+    What the PALI token is used for: fees, staking and rewards.
+  </Card>
+  <Card title="Glossary" href="/learn/concepts/glossary">
+    Short definitions for every Palliora-specific term used across these docs.
+  </Card>
+</CardGroup>
+
+See also [Security and Limitations](/learn/security-and-limitations): what Palliora actually guarantees end to end, and where the real, current edges are, pulled together from every concept page's own scoped-down claims.
+
+## Research
+
+<a href="https://palliora.org/whitepaper" className="gb-button gb-button-secondary">Read the white paper</a>
+
+* [Seminal idea by Dr. Amit Chaudhary, presented at CIFIRIS24](https://www.decifris.it/koine/vol5/W16)
+* [Lite paper, intermediate status](https://palliora.org/)
+* [Preprint on computable contracts](https://eprint.iacr.org/2025/1896.pdf)
+* [Preprint on tokenization](https://arxiv.org/pdf/2510.11065)

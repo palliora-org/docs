@@ -1,0 +1,78 @@
+---
+title: "Palliora CLI"
+---
+
+`palliora-cli` is a command-line tool for interacting with Palliora: managing accounts and keys, joining the network as a Guardian or Validator, staking, and network storage utilities. It's written in TypeScript and compiled to a single executable, `dist/palliora-cli.js`.
+
+Use `pnpm dev <command>` while developing against a local checkout, or `palliora-cli <command>` once installed.
+
+## Global flags
+
+* `--help`: show help
+* `--version`: show CLI version
+
+## Account commands
+
+| Command          | Description                                                     | Options                                                   |
+| ---------------- | --------------------------------------------------------------- | --------------------------------------------------------- |
+| `account-show`   | Show local account information                                  | `--secret` (show private key material)                    |
+| `account-create` | Create a new account and save it locally                        | `--dry` (dry run)                                         |
+| `account-import` | Import an account from a private key, mnemonic, or derived seed | `--private-key <hex>`, `--mnemonic`, `--derived`, `--dry` |
+| `account-info`   | Show the account's recorded details: balances, ledger           |                                                           |
+| `account-remove` | Delete the locally saved account file                           |                                                           |
+
+`--private-key`, `--mnemonic`, and `--derived` are mutually exclusive on `account-import`, pass exactly one.
+
+```bash
+palliora-cli account-create
+palliora-cli account-show
+palliora-cli account-import --mnemonic "your seed phrase"
+```
+
+`account-show --secret` prints real private key material to your terminal. Treat that output the same way you'd treat any other exposed secret: don't paste it into a chat, a screenshot, or a docs example.
+
+## Fund an account
+
+```bash
+palliora-cli fund --amount 5000000 --address 5F...
+```
+
+`fund` is a developer/test helper. `--amount` defaults to `1000000` and is coerced to a `bigint`; `--address` is the recipient.
+
+## Staking
+
+| Command          | Description                     | Options                                       |
+| ---------------- | ------------------------------- | --------------------------------------------- |
+| `stake-new`      | Create a new stake (bond)       | `--amount` (required), `--reward-destination` |
+| `stake-add`      | Add tokens to an existing stake | `--amount` (required)                         |
+| `stake-reduce`   | Unbond part of a stake          | `--amount` (required)                         |
+| `stake-remove`   | Unbond the entire staked amount |                                               |
+| `stake-withdraw` | Withdraw unbonded funds         |                                               |
+
+```bash
+palliora-cli stake-new --amount 1000000
+palliora-cli stake-reduce --amount 200000
+```
+
+## Joining the network
+
+| Command          | Description                    | Options                                                                         |
+| ---------------- | ------------------------------ | ------------------------------------------------------------------------------- |
+| `join-guardian`  | Join as a Guardian             | `--standard`, `--verifier`, `--compute` (comma list: `trusted,tee,mpc,fhe,zkp`) |
+| `join-validator` | Join as a Validator            | `--commission` (default `0`)                                                    |
+| `join-idle`      | Join as an idle staker (chill) |                                                                                 |
+
+```bash
+palliora-cli join-guardian --standard --compute trusted,tee
+palliora-cli join-validator --commission 5
+```
+
+See [Become a Guardian](/participate/become-a-guardian) and [Become a Validator](/participate/become-a-validator) for the full setup walkthrough around these commands.
+
+## Uploads
+
+`upload-model` and `upload-dataset` exist as commands but their handlers are currently placeholders (`TODO` in the CLI's own source), they don't yet do anything. Use the SDK or Explorer path in [Compute Artifacts: publish and run](/build/guides/compute-artifacts) instead.
+
+## Notes
+
+The CLI uses `milliPALI` units for token amounts internally and coerces values to `bigint`, supply integer values, not decimals.

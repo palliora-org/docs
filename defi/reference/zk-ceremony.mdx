@@ -1,0 +1,142 @@
+---
+title: "ZK ceremony"
+---
+
+Every proof is checked against a verification key. Anyone who knew the secret behind a key could forge proofs for it. A ceremony makes that secret impossible to know. This page says how the Palliora DeFi keys were made and how you can check that the contracts use them.
+
+## What a Phase 2 ceremony does
+
+Palliora DeFi uses Groth16 proofs. Each circuit needs its own proving key and verification key. A Phase 2 ceremony makes those keys from shared starting parameters.
+
+Contributors take turns. Each one mixes fresh secret randomness into the keys and then destroys it. The ceremony coordinator checks every step, so a bad contribution is rejected.
+
+The keys are safe if at least one contributor destroyed their randomness. You do not have to trust any one person. You have to trust that every contributor did not collude, and one honest contributor is enough.
+
+## Facts
+
+| Item                                      | Value                                              |
+| ----------------------------------------- | -------------------------------------------------- |
+| Kind                                      | Phase 2 ceremony for Groth16, one for each circuit |
+| Coordinator                               | p0tion, at `[CEREMONY_SITE_URL]`                   |
+| Started                                   | `[CEREMONY_START_DATE]`                            |
+| Finalised                                 | 2026-07-15                                         |
+| Contributions                             | 372 in total                                       |
+| Random beacon                             | `[CEREMONY_BEACON]`                                |
+| Attestation and final contribution hashes | `[CEREMONY_ATTESTATION_GIST_URL]`                  |
+| Final keys                                | `[CEREMONY_FINAL_KEYS_URL]`                        |
+
+The number of contributions counts all circuits together. It is not the number for each circuit.
+
+Contributors signed in with a GitHub account that met the minimum for followers, repositories and age, or proved they belong to a group without saying who they are, with an anonymous Semaphore proof.
+
+## The circuits
+
+| Circuit                                  | What it proves                                                      | Public inputs |
+| ---------------------------------------- | ------------------------------------------------------------------- | ------------- |
+| `register`                               | A wallet owns a shielded address                                    | 6             |
+| `treeUpdate`                             | A batch of queued commitments joins the commitment tree             | 64            |
+| `transact21`, `transact22`, `transact23` | A private transaction that spends up to 2 notes and makes 1, 2 or 3 | 12            |
+| `transact42`, `transact44`               | A private transaction that spends up to 4 notes and makes 2 or 4    | 12            |
+| `transact82`, `transact84`               | A private transaction that spends up to 8 notes and makes 2 or 4    | 12            |
+
+The names show the shape. In `transact42`, 4 is the most notes it can spend and 2 is the number of notes it makes. See [Shielded transactions](/defi/learn/concepts/shielded-transactions).
+
+## Where the keys are used
+
+Ethereum and HyperEVM use the same keys. Each network has nine verifier contracts, one for each circuit, and the HyperEVM contracts have the same bytecode as Ethereum's. Their addresses are in the Verifiers tables of [Network reference](/defi/reference/network-reference).
+
+## Verify the deployed verifiers
+
+A Groth16 verifier contract has the key's delta point written into its bytecode. If the contract uses the ceremony's key, the delta point in its bytecode is the delta point of the ceremony's final key. This check reads each verifier and looks for both coordinates of that point.
+
+The first listing is the expected delta point of each circuit. The names match the verifier contracts. Save it as `ceremony-manifest.json`.
+
+```json
+{
+  "VerifierRegister": {
+    "deltax1": "7629467949972773258812495104990153400517984964321627789105172265581394207199",
+    "deltax2": "17773009570953996192823023823940535239764280840691013752825023559109392756885"
+  },
+  "VerifierTreeUpdate": {
+    "deltax1": "16124584544797200438588944877872612875431664058448439026340877417568467567666",
+    "deltax2": "9573666701082378303384398619576931635782776565743021389358219470263383990559"
+  },
+  "VerifierTransact21": {
+    "deltax1": "17229406181428612679250519388436758579169638970799370005662764385548250988596",
+    "deltax2": "8028104745233285846277827178411289853686555047291148386310278761919113043540"
+  },
+  "VerifierTransact22": {
+    "deltax1": "6036691709533145959529427286221877729737384327028078749920517240522121834830",
+    "deltax2": "19390520473797155535090637606969961779797929843471019383317691426141502431853"
+  },
+  "VerifierTransact23": {
+    "deltax1": "10189030377134634422152105919010186530270274710927471606754753435546604916302",
+    "deltax2": "7178420443246071087328453451256825868347576793941040645372638484972667513112"
+  },
+  "VerifierTransact42": {
+    "deltax1": "2492543188333706463110516155116359935484979623475261608993484064994139693374",
+    "deltax2": "2763729511657121200259450983838910662666979672335338416320758141029896181750"
+  },
+  "VerifierTransact44": {
+    "deltax1": "260091220983662097706629595548372392975224653249602618663111661981738473518",
+    "deltax2": "18984387712908996144832444438984302066339024876577699171908369320042964626771"
+  },
+  "VerifierTransact82": {
+    "deltax1": "5502840494648928957597914614288886263116569431053963275140103504914961323481",
+    "deltax2": "8024477716144274265949500629303333286374198306747682975889893507953492880270"
+  },
+  "VerifierTransact84": {
+    "deltax1": "3150859458468318587993218081506524752304528323018290421885010944779090823436",
+    "deltax2": "2543255157558705344435051987135291058614241418671921211099650888533814238598"
+  }
+}
+```
+
+The second listing is the check. It needs [Foundry](https://getfoundry.sh) for `cast`, and Python 3.
+
+```python
+#!/usr/bin/env python3
+"""Check that each verifier embeds the delta point of its ceremony key."""
+import json, subprocess, sys
+
+rpc, manifest_path, verifiers_path = sys.argv[1:4]
+manifest = json.load(open(manifest_path))
+verifiers = json.load(open(verifiers_path))  # {"VerifierRegister": "0x...", ...}
+
+ok = True
+for name, delta in manifest.items():
+    code = subprocess.check_output(
+        ["cast", "code", verifiers[name], "--rpc-url", rpc], text=True
+    ).strip().lower()
+    # A value is stored padded to 32 bytes, or without its leading zeros.
+    found = all(format(int(delta[k]), "x") in code for k in ("deltax1", "deltax2"))
+    print(f"{name:20} {'match' if found else 'MISMATCH'}")
+    ok = ok and found
+sys.exit(0 if ok else 1)
+```
+
+Save the verifier addresses from the Verifiers table of the network you check in [Network reference](/defi/reference/network-reference) as `verifiers.json`, with the same names as in the manifest. The row for "Transact 2 in, 1 out" is `VerifierTransact21`, and so on. Then run the check.
+
+```bash
+python3 check_verifiers.py https://ethereum.publicnode.com \
+  ceremony-manifest.json verifiers.json
+```
+
+Every line should end in `match`. On 2026-10-16, all nine verifiers matched on Ethereum and all nine matched on HyperEVM.
+
+This shows that the contracts hold the delta points in the manifest. To check the manifest against the ceremony, export the verification key from each final key and compare. In the exported file, `deltax1` is `vk_delta_2[0][1]` and `deltax2` is `vk_delta_2[0][0]`.
+
+```bash
+snarkjs zkey export verificationkey register_final.zkey register_vk.json
+```
+
+## Test networks
+
+HyperEVM testnet does not use this ceremony. Its verifier keys were generated locally by one contributor, so the secret behind them is known. Anyone can forge a proof there. Use the test network only to test, and never mix its keys with mainnet's.
+
+See [Security and audits](/defi/reference/security-and-audits) for what else has been reviewed.
+
+## Next
+
+* [Rename map](/defi/reference/rename-map)
+* [Security and audits](/defi/reference/security-and-audits)

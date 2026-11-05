@@ -1,0 +1,63 @@
+---
+title: "Cryptographic primitives"
+---
+
+This page lists what the protocol is built from and what each piece is used for.
+
+| Primitive                                   | Used for                                                         |
+| ------------------------------------------- | ---------------------------------------------------------------- |
+| Baby Jubjub curve                           | Keys, signatures and the disclosure encryption                   |
+| Groth16 proofs, written in Circom           | Proving a transaction is valid without revealing it              |
+| Poseidon hash                               | Everything the circuits hash                                     |
+| SHA-256 and a universal hash                | Keeping verification cheap                                       |
+| Schnorr signatures                          | Authorizing a spend                                              |
+| Hashed ElGamal                              | Encrypting the disclosure seed                                   |
+| ChaCha20-Poly1305                           | Encrypting note data to its owner                                |
+| Shamir sharing with verifiable commitments  | Sharing the guardians' secret                                    |
+| Ed25519, X25519, HKDF and ChaCha20-Poly1305 | Sealing a report to the revoker's key before it goes to Palliora |
+| Palliora silent threshold encryption        | Protecting the stored report with a group of Palliora Guardians  |
+| Keccak-256                                  | Deriving keys, typed signatures, and values outside the circuits |
+
+## Baby Jubjub
+
+Baby Jubjub is an elliptic curve defined in [EIP-2494](https://eips.ethereum.org/EIPS/eip-2494). It is built to be cheap inside a zero-knowledge circuit. Every key in the protocol is a point on this curve or a scalar for it.
+
+## Groth16 and Circom
+
+A Groth16 proof is small, and it is fast to check on a smart contract. The circuits are written in Circom. There is one circuit for each transaction shape, one for registration, and one for tree updates. Groth16 needs a trusted setup per circuit. See [ZK ceremony](/defi/reference/zk-ceremony).
+
+## Poseidon
+
+Poseidon is a hash made for circuits. Anything that must be hashed inside a proof uses it: commitments, nullifiers, addresses, and the Merkle trees. The implementation is the one in circomlib.
+
+## SHA-256 and a universal hash
+
+A circuit gets expensive with every public value. To keep verification cheap, the pool does not pass every value to the verifier. It hashes the transaction's data with SHA-256 and with a Poseidon-based universal hash, and passes the hashes. The circuit checks that the same data produces the same hashes.
+
+## Schnorr signatures
+
+When you spend notes you sign the transaction with your sign key. The signature is a Schnorr signature over Baby Jubjub with Poseidon as the hash. The proof checks it inside the circuit, so no signature is ever published.
+
+## Hashed ElGamal
+
+The disclosure seed is encrypted with ElGamal on Baby Jubjub. The encryption is hashed, which means the mask is derived by hashing a shared point. The circuit proves the encryption was done correctly. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+
+## ChaCha20-Poly1305
+
+Note data is encrypted to the recipient's view key with ChaCha20-Poly1305. A short view tag is attached, so a wallet can skip notes that are not for it without decrypting each one.
+
+## Threshold sharing
+
+The guardians share their secret with Shamir sharing. A generation protocol with verifiable commitments lets every node check its share without trusting the dealer, and there is no dealer. See [Guardian key operations](/defi/participate/guardian-key-operations).
+
+## Report sealing
+
+A revoker's report is sealed before it leaves the browser. The report is encrypted to the revoker's Ed25519 key, which is mapped to X25519 for key agreement. HKDF derives the key, and ChaCha20-Poly1305 encrypts the report. The request binding is authenticated with it, so a sealed report cannot be replayed against another request. Palliora then applies its silent threshold encryption layer on top, run by its network Guardians. This is separate from the Decom guardians' Shamir sharing above. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## Keccak-256
+
+Keccak-256 is used where nothing needs to be proved in a circuit: turning your wallet signature into a seed, hashing typed messages, and deriving Private Sub-account keys.
+
+## Next
+
+* [Privacy model](/defi/learn/concepts/privacy-model)

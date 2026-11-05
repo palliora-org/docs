@@ -1,0 +1,63 @@
+---
+title: "Notes and commitments"
+---
+
+The pool does not keep balances. It keeps notes. Your balance is the sum of the notes you own and have not spent.
+
+## Notes
+
+A note is a piece of value of one token that belongs to one account. It is like a banknote. You spend a whole note, and you may get change back as a new note.
+
+| Field         | Meaning                                                               |
+| ------------- | --------------------------------------------------------------------- |
+| `assetId`     | The token the note holds. The pool gives each registered token an id. |
+| `value`       | How much of that token the note holds.                                |
+| `blinding`    | A random number that hides which account owns the note.               |
+| `rootAddress` | The root address of the owner.                                        |
+| `revoker`     | The public key of the revoker the note is tied to.                    |
+| `leafIndex`   | The note's position in the commitment tree.                           |
+
+The note stays private. Only its commitment goes on the public record.
+
+## Commitments
+
+A commitment is a hash that stands for a note without revealing it:
+
+```
+owner      = Poseidon(root address, revoker public key x, revoker public key y, blinding)
+commitment = Poseidon(assetId, owner, value)
+```
+
+The pool stores commitments in a Merkle tree. A Merkle tree is a binary tree of hashes. Each leaf is one commitment, each parent hashes its two children, and the top hash is the root. Changing any leaf changes the root, so the root stands for the whole set of notes.
+
+## Two trees
+
+| Tree            | Holds                                       | Depth | Capacity           | Roots remembered |
+| --------------- | ------------------------------------------- | ----- | ------------------ | ---------------- |
+| Commitment tree | One commitment per note ever created        | 25    | 33,554,432 notes   | 100              |
+| Address tree    | The root address of each registered account | 20    | 1,048,576 accounts | 50               |
+
+The pool remembers recent roots. A proof built against a root from a few updates ago is still accepted, so a new update does not break a transaction that is on its way.
+
+## Settling: how new notes join the tree
+
+A new commitment does not go straight into the tree. The pool first puts it in a queue. A tree update then inserts up to ten queued commitments at once. It comes with a zero-knowledge proof that the new root is correct, so the pool does not have to hash each insertion itself.
+
+Anyone can submit a tree update. The app does it for you. Until your new notes are in the tree you cannot spend them, and the app shows the balance as pending. Once the update lands the balance is available. The app calls this step settling.
+
+## Nullifiers
+
+When you spend a note you reveal its nullifier:
+
+```
+nullifier = Poseidon(leafIndex, commitment, x coordinate of (view private key times revoker public key))
+```
+
+The owner can compute a nullifier. It does not point back to the note, so an observer cannot tell which note was spent. The pool keeps every nullifier it has seen. A second transaction that reveals the same nullifier is rejected, so a note cannot be spent twice.
+
+The nullifier includes the revoker's public key. This ties a spent note to the disclosure setup, and it has a consequence for what the revoker can do on its own. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+
+## Next
+
+* [Shielded transactions](/defi/learn/concepts/shielded-transactions)
+* [Cryptographic primitives](/defi/learn/concepts/cryptographic-primitives)

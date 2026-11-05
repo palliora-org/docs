@@ -1,0 +1,165 @@
+---
+title: "Relayer API"
+---
+
+The HyperEVM relayer submits shielded transactions for users and gets paid a fee from the transaction itself. This page lists its HTTP endpoints and the rules it applies before it spends any gas. It is written from the relayer source.
+
+HyperEVM has no ERC-4337 bundler, so a relayer calls `pool.transact` directly. On Ethereum a bundler does this job. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas).
+
+The URL of the public relayer and its address are in [Network reference](/defi/reference/network-reference). Every fee must name that address. Read it from `/quote` in your code and do not copy it from a page. In the examples below, `$RELAYER_URL` is the relayer's URL.
+
+## Endpoints
+
+| Method and path    | Purpose                                                          | Success |
+| ------------------ | ---------------------------------------------------------------- | ------- |
+| `GET /health`      | Liveness and capacity                                            | `200`   |
+| `GET /quote`       | The relayer address, the accepted fee assets and the minimum fee | `200`   |
+| `POST /fund`       | Submit a proven `pool.transact`                                  | `202`   |
+| `GET /gas/quote`   | The GasStation address and price                                 | `200`   |
+| `POST /gas`        | Submit a GasStation purchase                                     | `202`   |
+| `POST /register`   | Submit a sponsored registration                                  | `202`   |
+| `GET /status/<id>` | State of a submitted job                                         | `200`   |
+
+Every response is JSON. Errors are `{ "error": "<message>" }`. A request body over 4 MB is refused.
+
+### `GET /health`
+
+```json
+{
+  "ok": true,
+  "relayer": "0x...",
+  "gasHype": "1.25",
+  "queueDepth": 0,
+  "pool": "0x..."
+}
+```
+
+`gasHype` is the relayer's HYPE balance. `queueDepth` is the number of jobs waiting.
+
+### `GET /quote`
+
+```json
+{
+  "relayer": "0x...",
+  "feeAssetId": 65538,
+  "feeAssetIds": [65538],
+  "feeValue": "50000"
+}
+```
+
+Your transaction must name `relayer` as its paymaster and pay at least `feeValue` in one of `feeAssetIds`. `feeValue` is in the base units of that asset. The current amount is in [Fees](/defi/reference/fees).
+
+### `POST /fund`
+
+```bash
+# Illustrative: calldata is the proven pool.transact call.
+curl -X POST "$RELAYER_URL/fund" \
+  -H 'content-type: application/json' \
+  -d '{"calldata":"0x..."}'
+```
+
+On success, `202` and `{ "id": "0x...", "state": "queued" }`. The `id` is the `keccak256` of the calldata, so a retry of the same calldata returns the same job and does not submit twice.
+
+The relayer refuses a request, before it spends gas, when any of these fail:
+
+| Check                                                                                                  | Refusal                                                                                                |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| The calldata is a hex string of whole 32-byte words after a 4-byte selector, and within the size limit | `calldata must be a hex string`, `calldata size out of bounds`, `calldata is not ABI word-aligned ...` |
+| The selector is `pool.transact`                                                                        | `selector ... is not sponsored`                                                                        |
+| The transaction is not a deposit                                                                       | `deposits carry no fee and are not relayed`                                                            |
+| The paymaster in the fee data is this relayer                                                          | `fee is paid to ..., not this relayer ...`                                                             |
+| The fee asset is accepted                                                                              | `fee asset ... is not accepted`                                                                        |
+| The fee is at least the quote                                                                          | `fee ... is below the quote ...`                                                                       |
+| A public asset of the fee asset carries at least the fee                                               | `fee is not carried by a public asset ...`                                                             |
+| A simulation of the call succeeds                                                                      | The revert reason from the simulation                                                                  |
+
+The last check is why `/fund` is safe for the relayer to run. It never sends a transaction it has not simulated.
+
+If the queue is full, the response is `503` with `{ "error": "queue full" }`. Try again shortly.
+
+### `GET /gas/quote` and `POST /gas`
+
+`/gas/quote` returns `{ station, chainId, usdc, feeUsdc, dropWei }`. It returns `404` if the relayer has no GasStation. Read `feeUsdc` and `dropWei` from the station on the network when you can, and treat the relayer's answer as a hint.
+
+`POST /gas` takes a signed EIP-3009 authorization from the account that wants gas:
+
+| Field         | Type        | Rule                                                                                                      |
+| ------------- | ----------- | --------------------------------------------------------------------------------------------------------- |
+| `burner`      | address     | The account to receive HYPE. The field keeps its original name. This is a Private Sub-account in the app. |
+| `validAfter`  | number      | In the past.                                                                                              |
+| `validBefore` | number      | At least 2 minutes ahead, to leave time to queue and mine.                                                |
+| `salt`        | 32-byte hex | Chosen by the caller. It sets the authorization nonce through the station's `nonceFor`.                   |
+| `signature`   | 65-byte hex | Signature over `ReceiveWithAuthorization`.                                                                |
+
+The relayer builds a `buyGas` call to the station and simulates it. The signature, the price and the payment are all checked by the station and by the simulation. See [Private Sub-accounts SDK](/defi/build/private-sub-accounts-sdk#6-buy-return-gas) for how to sign it.
+
+### `POST /register`
+
+Sponsored registration lets a wallet with no HYPE register. The relayer pays the gas for `pool.registerAddress`. The endpoint returns `404` if the relayer has it turned off.
+
+```bash
+curl -X POST "$RELAYER_URL/register" \
+  -H 'content-type: application/json' \
+  -d '{"calldata":"0x..."}'
+```
+
+It is safe to relay because the pool binds a registration to the signer of the EIP-712 message, not to the sender of the transaction. The relayer protects its own HYPE with these checks:
+
+* The calldata must be exactly `pool.registerAddress`, and the signature must recover to a signer.
+* The signer must not hold enough HYPE to register with its own gas.
+* The signer must hold a minimum of USDC on the network.
+* The relayer keeps a reserve of HYPE for funding jobs, which come first.
+* Daily caps apply per IP address and in total, and only accepted registrations count. See [Status and limits](/defi/reference/status-and-limits).
+* A simulation must succeed, so an already registered wallet or a bad proof is refused at no cost.
+
+Register the user's main wallet this way. Never register a Private Sub-account.
+
+### `GET /status/<id>`
+
+```json
+{ "id": "0x...", "state": "confirmed", "txHash": "0x..." }
+```
+
+| State       | Meaning                                                                 |
+| ----------- | ----------------------------------------------------------------------- |
+| `queued`    | Accepted, waiting its turn.                                             |
+| `submitted` | Sent to the network. `txHash` is set.                                   |
+| `confirmed` | Mined and successful.                                                   |
+| `rejected`  | Refused or reverted. `reason` says why. Nothing was spent on a refusal. |
+
+An unknown `id` returns `404`. The relayer does not keep the calldata after it tries the job.
+
+## How the relayer behaves
+
+* **One job at a time.** All jobs from one relayer key share a nonce sequence, so the relayer sends them one after another.
+* **No added delay.** The relayer submits as soon as a job reaches the front. Timing is the user's decision.
+* **Retries are safe.** A repeat of the same calldata returns the existing job.
+* **Receipts can lag.** The relayer polls for a receipt and treats "not found yet" as "not yet", because a load-balanced RPC can report a block before the receipt is available.
+* **Browser access.** The relayer sets CORS headers only for the origins it is configured to allow. Other callers are still served, but a page on another site cannot read the response.
+
+## Poll a job
+
+```ts
+// Illustrative.
+async function waitForJob(relayerUrl: string, id: string): Promise<string> {
+  const deadline = Date.now() + 180_000;
+  for (;;) {
+    const res = await fetch(`${relayerUrl}/status/${id}`);
+    if (!res.ok) throw new Error('unknown job id');
+    const job = await res.json();
+    if (job.state === 'confirmed') return job.txHash;
+    if (job.state === 'rejected') throw new Error(`relayer rejected it: ${job.reason}`);
+    if (Date.now() > deadline) throw new Error('timed out waiting for the relayer');
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+```
+
+## What the relayer sees
+
+The relayer sees the proven calldata, your IP address and the time of the request. It does not see keys, notes or anything else the proof hides. The relayer collects its fee in the pool, as a credit for its paymaster address, and an operator sweeps it with a separate admin tool. No HTTP endpoint moves fees.
+
+## Next
+
+* [Private Sub-accounts SDK](/defi/build/private-sub-accounts-sdk)
+* [Fees](/defi/reference/fees)

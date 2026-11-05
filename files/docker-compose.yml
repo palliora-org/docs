@@ -1,0 +1,400 @@
+# Palliora network — split deployment.
+#
+#   CPU-only machine   COMPOSE_PROFILES=validator           (optionally ,extras)
+#   GPU machine        COMPOSE_PROFILES=guardian,compute
+#   Third-party box    COMPOSE_PROFILES=operator
+#   Upload gateway     add ,s3auth to whichever box fronts uploads
+#
+# Every machine uses this same file with its own .env (see .env.example).
+# Guardians must reach the bootnode over BOOTNODE_MULTIADDR, and the compute
+# sidecars must reach a *guardian* RPC over GUARDIAN_RPC_WS — a validator
+# answers guardian.guardianList with an empty list.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared fragments
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Flags every node shares. Per-node flags (role, ports, base path, pruning)
+# come from each service's `command`, which Docker appends to this entrypoint.
+x-node: &node
+  image: ${NODE_IMAGE:-public.ecr.aws/palliora/palliora/node:rc5}
+  network_mode: host
+  restart: always
+  volumes:
+    - /etc/timezone:/etc/timezone:ro
+    - /etc/localtime:/etc/localtime:ro
+    - ${CHAIN_SPEC:-./palliora-manas.json}:/root/palliora-manas.json:ro
+    - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}:/root/palliora-data
+    - ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}:/root/keystores:ro
+  entrypoint:
+    - /usr/local/bin/palliora-node
+    - --chain=/root/palliora-manas.json
+    - --bootnodes=${BOOTNODE_MULTIADDR:?set BOOTNODE_MULTIADDR in .env}
+    - --rpc-cors=all
+    - --unsafe-rpc-external
+    - --no-telemetry
+    - --no-mdns
+    # Allows non-global addresses in the DHT, so the two machines find each
+    # other over their private subnet. Currently redundant — the spec's
+    # chainType is Development, which already enables this and private-IP
+    # dialling — but load-bearing the moment that becomes Live.
+    - --discover-local
+    - --in-peers=${NODE_IN_PEERS:-100}
+    - --out-peers=${NODE_OUT_PEERS:-100}
+
+# Every node also passes --public-addr=/ip4/${PUBLIC_IP}/tcp/<its port>, so the
+# DHT carries an address nodes on other networks can dial; otherwise a node
+# only knows its private and bridge addresses and nobody outside the VPC can
+# reach it. It cannot live in the entrypoint above: the node advertises the
+# address verbatim, so each service supplies its own port, plus /ws on
+# non-validators, which listen on WebSocket. An unset PUBLIC_IP makes the node
+# refuse to start with "invalid value '/ip4/PUBLIC_IP-not-set/...'".
+
+# Offchain endpoints the guardian binary reads (guardian/src/api/).
+#   TRAINING_HOST -> POST /create-groups   (training-server)
+#   COMPUTE_HOST  -> POST /compute         (compute-orchestrator)
+#   RESULT_HOST   -> POST /submitresult, /submitgroupinfo  (result relay)
+# Guardians run on the host network, so these are host-side ports.
+x-guardian-env: &guardian-env
+  RUST_LOG: ${GUARDIAN_RUST_LOG:-dac_guardian=trace}
+  TRAINING_HOST: ${TRAINING_URL:-http://localhost:7777}
+  COMPUTE_HOST: ${COMPUTE_URL:-http://localhost:7778}
+  RESULT_HOST: ${RESULT_RELAY_URL:-http://localhost:4040}
+
+x-host-gateway: &host-gateway
+  extra_hosts:
+    - host.docker.internal:host-gateway
+
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Validators — CPU-only machine. validator1 is the bootnode.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  validator1:
+    <<: *node
+    profiles: [validator]
+    environment:
+      RUST_LOG: ${VALIDATOR_RUST_LOG:-sync=debug,db=debug,sub-libp2p=debug,dac_guardian=trace}
+    command:
+      - --validator
+      - --force-authoring
+      # Runs the guardian protocol so that guardian.guardianList is served on
+      # :9944 — the peer set behind that RPC is only populated on a node
+      # running it. Deliberately gets no compute endpoints: this node answers
+      # the list, it does not execute jobs.
+      - --guardian
+      - --base-path=/root/palliora-data/validator1
+      - --keystore-path=/root/keystores/account1/keystore
+      - --port=30333
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30333
+      - --rpc-port=9944
+      - --blocks-pruning=archive
+      - --state-pruning=archive
+
+  validator2:
+    <<: *node
+    profiles: [validator]
+    environment:
+      RUST_LOG: ${VALIDATOR_RUST_LOG:-sync=debug,db=debug,sub-libp2p=debug,dac_guardian=trace}
+    command:
+      - --validator
+      - --force-authoring
+      - --base-path=/root/palliora-data/validator2
+      - --keystore-path=/root/keystores/account2/keystore
+      - --port=30334
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30334
+      - --rpc-port=9945
+      - --rpc-methods=Unsafe
+      - --blocks-pruning=${VALIDATOR_PRUNING:-2560}
+      - --state-pruning=${VALIDATOR_PRUNING:-2560}
+
+  validator3:
+    <<: *node
+    profiles: [validator]
+    environment:
+      RUST_LOG: ${VALIDATOR_RUST_LOG:-sync=debug,db=debug,sub-libp2p=debug,dac_guardian=trace}
+    command:
+      - --validator
+      - --force-authoring
+      - --base-path=/root/palliora-data/validator3
+      - --keystore-path=/root/keystores/account3/keystore
+      - --port=30335
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30335
+      - --rpc-port=9946
+      - --blocks-pruning=${VALIDATOR_PRUNING:-2560}
+      - --state-pruning=${VALIDATOR_PRUNING:-2560}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Guardians — GPU machine. These are the nodes that dispatch compute, so
+  # they carry the offchain endpoints; the guardian mesh forms between them.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  guardian1:
+    <<: *node
+    profiles: [guardian]
+    environment: *guardian-env
+    command:
+      - --guardian
+      - --base-path=/root/palliora-data/guardian1
+      - --keystore-path=/root/keystores/account4/keystore
+      - --port=30336
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30336/ws
+      - --rpc-port=9947
+      - --rpc-methods=Unsafe
+      - --blocks-pruning=archive
+      - --state-pruning=archive
+
+  guardian2:
+    <<: *node
+    profiles: [guardian]
+    environment: *guardian-env
+    command:
+      - --guardian
+      - --base-path=/root/palliora-data/guardian2
+      - --keystore-path=/root/keystores/account5/keystore
+      - --port=30337
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30337/ws
+      - --rpc-port=9948
+      - --rpc-methods=Unsafe
+      - --blocks-pruning=${GUARDIAN_PRUNING:-2560}
+      - --state-pruning=${GUARDIAN_PRUNING:-2560}
+
+  guardian3:
+    <<: *node
+    profiles: [guardian]
+    environment: *guardian-env
+    command:
+      - --guardian
+      - --base-path=/root/palliora-data/guardian3
+      - --keystore-path=/root/keystores/account6/keystore
+      - --port=30338
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30338/ws
+      - --rpc-port=9949
+      - --rpc-methods=Unsafe
+      - --blocks-pruning=${GUARDIAN_PRUNING:-2560}
+      - --state-pruning=${GUARDIAN_PRUNING:-2560}
+
+  guardian4:
+    <<: *node
+    profiles: [guardian]
+    environment: *guardian-env
+    command:
+      - --guardian
+      - --base-path=/root/palliora-data/guardian4
+      - --keystore-path=/root/keystores/account7/keystore
+      - --port=30339
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30339/ws
+      - --rpc-port=9950
+      - --rpc-methods=Unsafe
+      - --blocks-pruning=${GUARDIAN_PRUNING:-2560}
+      - --state-pruning=${GUARDIAN_PRUNING:-2560}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Operator guardian — for anyone running their own compute capacity on
+  # their own box, with their own key.
+  #
+  #   COMPOSE_PROFILES=operator
+  #
+  # Starts this node plus the four compute sidecars below, which carry the
+  # `operator` profile too, so one value brings up a whole working stack.
+  #
+  # Same shape as guardian1, with one difference that matters: it is bound to
+  # no pre-provisioned account. Point KEYSTORE_ROOT at your own directory and
+  # OPERATOR_KEYSTORE_PATH at the keystore inside it — see .env.example for
+  # the layout, and keep the :ro, which is what turns a wrong path into a
+  # crash instead of a node that runs with zero keys and never signs.
+  #
+  # Archive by default, like guardian1: this is the only node the sidecars
+  # can query, and a pruned one answers lookups for an older block as though
+  # the data had never existed. Set OPERATOR_PRUNING=2560 to trade that for
+  # disk.
+  #
+  # PUBLIC_IP is the address other guardians dial. Without it the node
+  # reaches the bootnode and syncs, but no guardian ever connects to it.
+  #
+  # Peering is not registration. A fresh operator guardian syncs and reaches
+  # peers: n normally while guardian.guardianList never names it, and it is
+  # given no work until it joins on chain — see palliora-cli join-guardian.
+  #
+  # Inherits --unsafe-rpc-external and --rpc-cors=all from x-node, so
+  # OPERATOR_RPC_PORT is served to every address the host permits. Firewall
+  # it to this box: the sidecars reach it over host.docker.internal, so
+  # nothing here needs it published.
+  guardian-operator:
+    <<: *node
+    profiles: [operator]
+    environment: *guardian-env
+    command:
+      - --guardian
+      - --base-path=/root/palliora-data/guardian-operator
+      - --keystore-path=${OPERATOR_KEYSTORE_PATH:-/root/keystores/keystore}
+      - --port=${OPERATOR_P2P_PORT:-30336}
+      - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/${OPERATOR_P2P_PORT:-30336}/ws
+      - --rpc-port=${OPERATOR_RPC_PORT:-9947}
+      - --blocks-pruning=${OPERATOR_PRUNING:-archive}
+      - --state-pruning=${OPERATOR_PRUNING:-archive}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Compute sidecars — GPU machine, alongside the guardians.
+  # Bridge network: they reach the host-network guardians, and the host Ollama
+  # process holding the GPU, via host.docker.internal; each other by name.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  # Serves COMPUTE_HOST (/compute) and POST /rate-quote. Spawns the result
+  # relay on 4040 and the docker-gateway on its socket; Redis is in the image.
+  compute-orchestrator:
+    image: ${COMPUTE_IMAGE:-public.ecr.aws/palliora/orchestrator:latest}
+    profiles: [compute, operator]
+    restart: always
+    <<: *host-gateway
+    ports:
+      - ${COMPUTE_PORT:-7778}:7778
+      - ${RESULT_RELAY_PORT:-4040}:4040
+    environment:
+      PORT: 7778
+      RELAY_PORT: 4040
+      RESULT_RELAY_URL: http://localhost:4040
+      GATEWAY_BINARY_PATH: /usr/local/bin/docker-gateway
+      GATEWAY_SOCKET_PATH: /tmp/docker-gateway.sock
+      RELAY_ENTRY_PATH: /app/relay/dist/index.js
+      DB_PATH: /app/data/orchestrator.db
+      STAGING_DIR: ${COMPUTE_STAGING_DIR:-/tmp/compute}
+      PALLIORA_WS: ${GUARDIAN_RPC_WS:-ws://host.docker.internal:9947}
+      PALLIORA_RPC_URL: ${GUARDIAN_RPC_WS:-ws://host.docker.internal:9947}
+      OLLAMA_BASE_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      COST_ESTIMATOR_URL: ${COST_ESTIMATOR_URL:-http://estimation-server:4141}
+      PRIVATE_KEY: ${PRIVATE_KEY:?set PRIVATE_KEY in .env}
+      SUBMITTER_ACCOUNT_ID: ${SUBMITTER_ACCOUNT_ID:?set SUBMITTER_ACCOUNT_ID in .env}
+      STATIC_RESPONSE_KEY: ${STATIC_RESPONSE_KEY}
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Must be the same absolute path on both sides: the daemon resolves
+      # bind-mount sources on the host.
+      - ${COMPUTE_STAGING_DIR:-/tmp/compute}:${COMPUTE_STAGING_DIR:-/tmp/compute}
+      - compute-core-data:/app/data
+    group_add:
+      - ${DOCKER_GID:-988}
+
+  # Serves TRAINING_HOST (/create-groups).
+  training-server:
+    image: ${TRAINING_IMAGE:-public.ecr.aws/palliora/palliora/training-server}
+    profiles: [compute, operator]
+    restart: always
+    depends_on:
+      - redis
+    <<: *host-gateway
+    ports:
+      - ${TRAINING_PORT:-7777}:7777
+    environment:
+      WS_ENDPOINT: ${GUARDIAN_RPC_WS:-ws://host.docker.internal:9947}
+      NODE_ENV: production
+      WANDB_MODE: disabled
+      AGENT_REGISTRY_URL: ${AGENT_REGISTRY_URL:-http://connect.lynra.ai:8090}
+      PUBLIC_BASE_URL: ${AGENT_PUBLIC_BASE_URL:-https://connect.lynra.ai}
+      AGENT_LOCAL_HOST: host.docker.internal
+      AGENT_TTL_SECONDS: ${AGENT_TTL_SECONDS:-3600}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Backs the orchestrator's /rate-quote. Only needed for agreements carrying
+  # an oracle_quote_id; without it guardians price against their own thresholds.
+  estimation-server:
+    image: ${ESTIMATION_IMAGE:-public.ecr.aws/palliora/cost-estimation}
+    profiles: [compute, operator]
+    restart: always
+    <<: *host-gateway
+    ports:
+      - ${ESTIMATION_PORT:-4141}:4141
+    environment:
+      PALLIORA_WS: ${GUARDIAN_RPC_WS:-ws://host.docker.internal:9947}
+      NODE_ENV: production
+
+  # The training-server's job queue. The orchestrator has its own Redis in-image.
+  redis:
+    image: ${REDIS_IMAGE:-redis:alpine}
+    profiles: [compute, operator]
+    restart: always
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Presigned-upload gateway — its own profile, so it runs on whichever box
+  # fronts contract uploads.
+  #
+  #   COMPOSE_PROFILES=validator,s3auth
+  # ───────────────────────────────────────────────────────────────────────────
+
+  # POST /api/s3/auth hands back a presigned S3 PUT for Contracts/<fileHash>,
+  # but only after it finds the caller's compute.agreement extrinsic in the
+  # block they name and the url committed in it matches the bucket's. It reads
+  # the chain over PALLIORA_WS and calls nothing guardian-specific.
+  #
+  # That lookup is by block number, so PALLIORA_WS has to be an archive node.
+  # Against a pruned one an older block answers 403 "transaction not found in
+  # block", which reads as a bad request rather than as missing history.
+  #
+  # The image carries its own HEALTHCHECK against /healthz, so there is no
+  # healthcheck: block here. It answers healthy on a blank AWS key and only
+  # fails on the first upload, so verify a POST, not just the health check.
+  s3-auth-service:
+    image: ${S3_AUTH_IMAGE:-public.ecr.aws/palliora/s3-auth-service:latest}
+    profiles: [s3auth]
+    restart: always
+    <<: *host-gateway
+    # Mirrors the live container on main, which overrides the image's
+    # USER node. Nothing is mounted and the process only listens and reads
+    # env, so this is probably droppable — untested.
+    user: "0"
+    ports:
+      - ${S3_AUTH_PORT:-3000}:3000
+    environment:
+      PORT: 3000
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-palliora-storage}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      PALLIORA_WS: ${S3_AUTH_CHAIN_WS:-ws://host.docker.internal:9944}
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Dev-key nodes — opt-in (COMPOSE_PROFILES=validator,extras), CPU machine.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  alice:
+    <<: *node
+    profiles: [extras]
+    command:
+      - --alice
+      - --base-path=/root/palliora-data/alice
+      - --port=30323
+      - --rpc-port=9954
+      - --blocks-pruning=archive
+      - --state-pruning=archive
+      # As on validator1: serves guardian.guardianList, executes nothing.
+      - --guardian
+      - --enable-kate-rpc
+
+  bob:
+    <<: *node
+    profiles: [extras]
+    command:
+      - --bob
+      - --base-path=/root/palliora-data/bob
+      - --port=30324
+      - --rpc-port=9955
+      - --blocks-pruning=${EXTRAS_PRUNING:-2560}
+      - --state-pruning=${EXTRAS_PRUNING:-2560}
+
+  charlie:
+    <<: *node
+    profiles: [extras]
+    command:
+      - --charlie
+      - --base-path=/root/palliora-data/charlie
+      - --port=30325
+      - --rpc-port=9956
+      - --blocks-pruning=${EXTRAS_PRUNING:-2560}
+      - --state-pruning=${EXTRAS_PRUNING:-2560}
+
+volumes:
+  compute-core-data:

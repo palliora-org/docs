@@ -1,0 +1,37 @@
+---
+title: "Status and Roadmap"
+---
+
+What is live, what is on testnet, and what is still a design. This page is the source of truth. Every other page should agree with it.
+
+"Live" on these pages means live on Manas, Palliora's public testnet. Palliora is preparing for mainnet.
+
+| Capability                                                  | Status                            | Notes                                                                       |
+| ----------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------- |
+| Manas public testnet                                        | Live (testnet)                    | About 700 TPS, 6-second blocks, 15 to 20 second finality                    |
+| Guardians, validators, compute nodes                        | Live (testnet)                    | New Guardians are admitted every 4 hours                                    |
+| Verifiers                                                   | Live (testnet)                    |                                                                             |
+| Trusted execution                                           | Live (testnet)                    |                                                                             |
+| TEE execution (Intel TDX)                                   | Live (testnet)                    | On Guardians with confidential-compute hardware. Not every Guardian has it. |
+| Threshold-encrypted inference                               | Live (testnet), with a workaround | Guardian key lookup is manual                                               |
+| SMPC and FHE execution                                      | Roadmap                           |                                                                             |
+| ZK compute                                                  |                                   | The CLI and SDK accept `zkp`                                                |
+| Accountable privacy (disclosure requests)                   |                                   |                                                                             |
+| View keys                                                   |                                   |                                                                             |
+| EVM chains                                                  | Live (testnet) on Ethereum        | Through Palliora DeFi.                                                      |
+| Hyperliquid                                                 | Live (testnet)                    | Through Palliora DeFi                                                       |
+| Web2 platforms (server-side)                                |                                   | Through the SDKs                                                            |
+| Solana                                                      | Exploring                         |                                                                             |
+| Public indexer                                              | Not confirmed                     | Run your own, or ask the team                                               |
+| Palliora DeFi SDK                                           | Live (testnet)                    | On Hyperliquid and Ethereum                                                 |
+| Palliora DeFi demo app (shielded transfers)                 | Live (testnet)                    | At app.veilnyx.com for now; the URL will change                             |
+| Palliora DeFi vaults                                        | Live (testnet)                    | On Hyperliquid and Ethereum                                                 |
+| Palliora AI SDK                                             | In development (testnet)          |                                                                             |
+| Palliora AI demo app                                        | Live (testnet)                    | AI Workbench, at [ai.palliora.org](https://ai.palliora.org/).               |
+| Private model inference in a TEE                            | Testnet, demo                     | One Guardian runs a small model inside Intel TDX                            |
+| More Guardians with large-model hardware                    | Planned                           |                                                                             |
+| Plug-ins for model routers (OpenRouter, Venice and similar) | In progress                       |                                                                             |
+| Private and specialised model market                        | Planned                           |                                                                             |
+| Security audit                                              | Done                              |                                                                             |
+| Mainnet                                                     | In preparation                    |                                                                             |
+| PALI token launch                                           |                                   | Planned around public mainnet                                               |

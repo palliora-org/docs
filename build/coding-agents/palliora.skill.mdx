@@ -1,0 +1,98 @@
+---
+title: "Skill File, downloadable"
+description: "Use when writing code that talks to Palliora, installing or configuring @palliora.org/chainsdk, signing accounts, guardian groups, compute agreements (plain or encrypted inference), data availability,"
+---
+
+Condensed, agent-actionable reference. Full detail lives in this same docs site, each directly downloadable as Markdown: [SDK Reference](/build/reference/sdk-reference), [Troubleshooting](/build/reference/troubleshooting), and [Network Reference](/build/reference/network-reference). Read those if something here is wrong or incomplete, this file is a map, not the final word.
+
+## Setup
+
+```bash
+npm install @palliora.org/chainsdk
+```
+
+```ts
+import { init, getKeyring } from "@palliora.org/chainsdk";
+
+init({ pallioraWs: "wss://staging.manas-rpc.palliora.org" });
+const keyring = await getKeyring();
+const account = keyring.addFromUri("//Bob"); // dev-only, never for real funds
+```
+
+`wss://staging.manas-rpc.palliora.org` is the confirmed-working endpoint. The SDK's own default (`wss://manas-rpc.palliora.org`, no `staging.` prefix) is not independently confirmed for the full guardian/compute flow. Always pass the staging URL explicitly.
+
+## Plain inference, the default starting point
+
+```ts
+import { getGuardianAddress, inferenceCompute, getApi, scanForBlockEvent, fetchAndDecodeExtrinsic } from "@palliora.org/chainsdk";
+
+const guardians = (await getGuardianAddress()).slice(0, 3).map((g) => g.address);
+
+const result = await inferenceCompute(
+  { input: JSON.stringify({ model: "gemma3:1b", messages: [{ role: "user", content: "..." }], stream: false }),
+    guardians, fee: { amount: 0.05, computeRate: 0.00002 }, deadline: 0 },
+  account,
+);
+// result = { blockNumber, index, hash, agreementId }
+// Does NOT return the answer. compute.result lands later as a separate
+// extrinsic. Poll for it:
+
+const api = await getApi();
+const match = await scanForBlockEvent(api, {
+  predicate: async (block, _event, phase) => {
+    if (!block || !phase.isApplyExtrinsic) return false;
+    const ext = block.block.extrinsics[phase.asApplyExtrinsic.toNumber()];
+    if (ext?.method?.section?.toLowerCase() !== "compute" || ext?.method?.method?.toLowerCase() !== "result") return false;
+    const emitted = "0x" + Array.from(ext.method.args[0]).map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+    return emitted === result.agreementId;
+  },
+}, result.blockNumber + 1, 300); // 300, not the 20-block default, real inference is slower than that
+
+const { decoded } = await fetchAndDecodeExtrinsic(match.blockNumber, match.extrinsicIndex ?? 0);
+const answer = new TextDecoder().decode(Buffer.from(decoded.method.args.contract.compute.input.Inline.data.slice(2), "hex"));
+```
+
+Guardians run a small curated Ollama model set, not an arbitrary one: `gemma3:1b`, `deepseek-r1:1.5b`, `llama3.2:1b`, `qwen3:0.6b`. Any other model submits fine and fails at execution.
+
+## Fee rules, read before writing agreement code
+
+A compute agreement clears two independent checks, failing one tells you nothing about the other:
+
+1. **The network's fee floor.** `fees` must clear a formula over live parameters. Call `estimateMinFee({ computeRate })` first, don't hardcode a number, it's root-settable and changes.
+2. **Each guardian's own rate threshold**, per compute type. If `computeRate` is under a named guardian's declared minimum, the transaction gets included and then emits `AgreementFailed`, nothing is reserved.
+
+Silent failure mode worth knowing: if a named guardian is offline or never responds, `compute.agreement` does not error, it sits in a future queue indefinitely with no feedback. Name guardians you have reason to believe are actually live (`getGuardianAddress()`, recent activity).
+
+`computeRate` must be nonzero on `Active`/`Subscription` contracts (`ZeroComputeRate` otherwise). Only `Dormant` contracts may have a zero rate.
+
+## Threshold-encrypted (private) compute
+
+Needs a 3-guardian group and several crypto helpers (`createGuardianGroupAndWatch`, `testCrypt`, `gen_stretched_key`, `encrypt`/`decrypt`, `gen_shared_key`). See [Encrypted Compute](/build/guides/encrypted-compute) for the full worked example before attempting this from scratch, the parameter shapes are large and order-sensitive.
+
+**Known gap**: there's no reliable way to look up an arbitrary guardian's Ed25519 result-decryption key from its address. The publicly-recorded- looking field (`staking.guardians(address).pubKey`) is actually that guardian's sr25519 signing key, feeding it to `gen_shared_key` throws. Use an out-of-band map instead:
+
+```ts
+const GUARDIAN_NODE_PUBKEYS = {
+  "wss://staging.manas-rpc.palliora.org": "0x3b69e6c40864462682276fdbbad239a56f8c0d83a4d77a252df95bd6dff65dd0",
+};
+```
+
+That value is confirmed correct for the staging network's guardian set by a full working decrypt, not a placeholder.
+
+## Common failures
+
+| Symptom                                                 | Cause                                                                            |
+| ------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `InsufficientFreeBalance`                               | `fees` below the floor, or balance too low. Call `estimateMinFee`.               |
+| `AgreementFailed` event, nothing reserved               | A guardian's rate threshold rejected your `computeRate`.                         |
+| `compute.agreement` never completes, no error           | A named guardian hasn't responded. Parked in a future queue.                     |
+| `AgreementNotFound` on `invoke`                         | Unknown contract ID, or a `Subscription` with no settlement record.              |
+| `InvalidContractType` on `invoke`                       | `invoke` only works on `Subscription` contracts.                                 |
+| `bad point: invalid y coordinate` from `gen_shared_key` | Passed a sr25519 key where an Ed25519 key was expected, see the known gap above. |
+| No `compute.result` within the wait window              | Give it 300 blocks, not the SDK's 20-block default.                              |
+
+Full table with more entries: [Troubleshooting](/build/reference/troubleshooting).
+
+## Style, if you're generating docs or examples for a Palliora project
+
+Simple language, no em dashes, code blocks that actually run. Describe Palliora as the private computer for the open internet: it works with the chains and platforms applications already use. Don't call it a blockchain, a chain or a network that users move to. Say "Manas" or "the coordination ledger" when you mean the ledger, and "the Guardian network" when you mean the Guardians. The two products are Palliora DeFi (private trading on any chain, accountable to regulators) and Palliora AI (private, accountable compute for AI); its demo app is AI Workbench, live at ai.palliora.org. Reserve "on-chain"/"off-chain" for places where you mean something genuinely different from "publicly recorded"/"private."

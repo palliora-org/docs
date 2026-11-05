@@ -1,0 +1,190 @@
+---
+title: "SDK reference"
+---
+
+This page lists the SDK packages, the `Core` class and the types you pass to it. It is written from the SDK source at version 1.4.3. When this page and the source disagree, the source is right.
+
+## Packages
+
+The packages are renamed from `@veilnyx-sdk/*` to `@palliora.org/defi-*`. See the [Rename map](/defi/reference/rename-map).
+
+| New name                          | Old name                    | What it holds                                                    |
+| --------------------------------- | --------------------------- | ---------------------------------------------------------------- |
+| `@palliora.org/defi-core`         | `@veilnyx-sdk/core`         | The `Core` class, fee helpers and chain list                     |
+| `@palliora.org/defi-account`      | `@veilnyx-sdk/account`      | `ShieldedAccount`, the signer, the viewer and shielded addresses |
+| `@palliora.org/defi-transaction`  | `@veilnyx-sdk/transaction`  | `Transaction` and `Note`                                         |
+| `@palliora.org/defi-zk-prover`    | `@veilnyx-sdk/zk-prover`    | `Prover`, `ZTransaction`, `TreeUpdateData` and registration data |
+| `@palliora.org/defi-services`     | `@veilnyx-sdk/services`     | Reference data services and the address resolver                 |
+| `@palliora.org/defi-shared-types` | `@veilnyx-sdk/shared-types` | Request types, service interfaces and enums                      |
+| `@palliora.org/defi-babyjubjub`   | `@veilnyx-sdk/babyjubjub`   | Curve points, Schnorr signatures and Poseidon                    |
+| `@palliora.org/defi-utils`        | `@veilnyx-sdk/utils`        | Small encoding helpers                                           |
+
+## `ShieldedAccount`
+
+```ts
+import { ShieldedAccount } from '@palliora.org/defi-account';
+```
+
+| Member                                 | Description                                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `ShieldedAccount.generate(seed)`       | Builds an account from a seed (a field element). The sign and view keys are 248 bits each. |
+| `ShieldedAccount.random()`             | Builds an account from a random seed.                                                      |
+| `rootAddress`                          | `Poseidon(signPub.x, signPub.y, viewPrivateKey)`, as a `bigint`.                           |
+| `signer`, `viewer`                     | The two key pairs.                                                                         |
+| `shieldedAddress`                      | A `ShieldedAddress`. Call `.pack()` for the 96-byte form used as `to`.                     |
+| `sign(message)`, `signTransaction(tx)` | Schnorr signatures with the signing key.                                                   |
+| `encrypt(data)`, `decrypt(data)`       | Encrypt to, or decrypt with, the viewing key.                                              |
+
+See [Shielded accounts](/defi/learn/concepts/shielded-accounts) for how the keys relate.
+
+## `Core`
+
+```ts
+import { Core } from '@palliora.org/defi-core';
+```
+
+### Options
+
+| Option        | Type                                  | Required        | Description                                                            |
+| ------------- | ------------------------------------- | --------------- | ---------------------------------------------------------------------- |
+| `chainId`     | `number`                              | Yes             | Must be in the SDK chain list, or `Core` throws `Unsupported chainId`. |
+| `account`     | `ShieldedAccount`                     | Yes             | The account that signs and decrypts.                                   |
+| `rpc`         | `PublicClient` or `string`            | Yes             | A viem public client, or an RPC URL.                                   |
+| `explorerApi` | `string`                              | Yes             | Base URL of an explorer API, used by the reference contract source.    |
+| `contracts`   | `{ pool, paymaster, deployedBlock? }` | Yes in practice | Addresses. `deployedBlock` is the lower bound for address resolution.  |
+| `circuits`    | `Record<string, CircuitPath>`         | Yes in practice | Maps a circuit name to `{ wasm, zKey, vKey }`.                         |
+| `services`    | see below                             | Yes             | The data services.                                                     |
+| `snarkJs`     | `any`                                 | No              | A `snarkjs` instance. `Core` stores it on `globalThis.snarkjs`.        |
+
+Circuit names are `register`, `transact21`, `transact22`, `transact23`, `transact42`, `transact44` and `treeUpdate`. The name of a `transact` circuit is the number of input notes followed by the number of output notes, so `transact42` has four in and two out. The prover builds the name from the transaction and throws `Circuit path for <name> not found` if you did not supply that circuit.
+
+`Core` throws `Explicit services are required for now` unless you give it a `contractSource`, a `notesSource`, a `commitmentTreeSource` and an `addressTreeSource`.
+
+### Methods
+
+| Method                                                                                         | Returns                                    | What it does                                                                                                      |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `createTransaction(req, options)`                                                              | `Promise<Transaction>`                     | Validates the request, resolves the recipient, picks notes, reads the revoker and builds an unsigned transaction. |
+| `signTransaction(tx)`                                                                          | `Promise<Transaction>`                     | Signs with the shielded signing key.                                                                              |
+| `proveTransaction(tx)`                                                                         | `Promise<ZTransaction>`                    | Runs the circuit. Throws `Only signed transaction can be proved` if unsigned.                                     |
+| `proveAddress(signature, publicAddress)`                                                       | `Promise<ShieldedAddressRegistrationData>` | Proves registration. `publicAddress` must be the signer of `signature`.                                           |
+| `proveTreeUpdate(forceUpdate?)`                                                                | `Promise<TreeUpdateData>`                  | Proves a batch insert of queued commitments.                                                                      |
+| `getBalances()`                                                                                | `Promise<{ current, pending }>`            | Two maps from asset id to `bigint`. Dummy notes are skipped.                                                      |
+| `getTransactionHistory(fromBlock?, toBlock?)`                                                  | `Promise<...>`                             | History read through the contract source.                                                                         |
+| `getShieldedAddress(addressOrEns)`                                                             | `Promise<Hex or null>`                     | Looks up the shielded address registered for an address or ENS name.                                              |
+| `getRevokerData(id)`                                                                           | `Promise<RevokerData>`                     | Reads the revoker's keys and status from the pool.                                                                |
+| `getCommitmentTreeState()`                                                                     | `Promise<...>`                             | Reads the queue and the last root from the pool.                                                                  |
+| `getUserOpFeeInFeeAsset(options, feeAssetId, client)`                                          | `Promise<bigint>`                          | Converts the user operation fee to the fee asset through the paymaster.                                           |
+| `switchAccount(account)`                                                                       | `void`                                     | Replaces the account.                                                                                             |
+| `proveOutsourcedVerificationTx`, `proveAddressAndOutsourceVerification`, `generateNebraClient` |                                            | Prove and send the proof to an outside verification service. Optional.                                            |
+
+### `TransactionRequest`
+
+| Field        | Type              | Description                                                           |
+| ------------ | ----------------- | --------------------------------------------------------------------- |
+| `type`       | `TransactionType` | See below.                                                            |
+| `assetIds`   | `number[]`        | Pool asset ids to move.                                               |
+| `values`     | `bigint[]`        | Amounts, in each token's base units. Same length as `assetIds`.       |
+| `feeAssetId` | `number`          | The asset the fee is paid in. `0` means no fee.                       |
+| `to`         | `string`          | A public address, an ENS name, or a 96-byte packed shielded address.  |
+| `payload`    | `Hex`             | For adaptor calls: the bytes passed to the adaptor. Defaults to `0x`. |
+
+### `TransactionType`
+
+| Value | Name           | `to` is                                            | Notes                                                                                             |
+| ----- | -------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 0     | `DEPOSIT`      | A shielded address, or a registered public address | `feeAssetId` must be `0`. Wallet path only.                                                       |
+| 1     | `TRANSFER`     | A shielded address, or a registered public address |                                                                                                   |
+| 2     | `WITHDRAW`     | A public address (20 bytes)                        |                                                                                                   |
+| 3     | `CALL_ADAPTER` | The adaptor address (20 bytes)                     | The SDK spells it `ADAPTER`. The Solidity enum spells it `CALL_ADAPTOR`. They are the same value. |
+
+### `TransactionOptions`
+
+| Field                | Type      | Description                                                                                                |
+| -------------------- | --------- | ---------------------------------------------------------------------------------------------------------- |
+| `revokerId`          | `number`  | Which revoker's key the transaction is encrypted to. It must be active.                                    |
+| `viaBundler`         | `boolean` | `false` for the wallet path. Defaults to `true` for every type but `DEPOSIT`.                              |
+| `paymaster`          | `Hex`     | Overrides the paymaster from `contracts`.                                                                  |
+| `userOpFeeQuoteEth`  | `bigint`  | The native-token fee quote for the user operation. Required with `viaBundler` and a non-zero `feeAssetId`. |
+| `requiredPrefundEth` | `bigint`  | Deprecated name for `userOpFeeQuoteEth`. If you set both, they must be equal.                              |
+
+A request is rejected before any work if `assetIds` and `values` differ in length, a `DEPOSIT` has a fee, a bundler transaction has no fee asset, or a `WITHDRAW` or `CALL_ADAPTER` has a `to` that is not a public address.
+
+`createTransaction` spends only notes that are already in the commitment tree. A note still in the queue is counted in `pending` and is not chosen.
+
+## Results
+
+| Object                            | Key members                                                                                                                                                                        |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Transaction`                     | `hash()`, `isSigned()`, `signature`, `inNotes`, `outNotes`, `memos`, `pubAssetIds`, `pubValues`, `feeAssetId`, `feeValue`, `paymaster`, `target`, `targetPayload`, `refundAddress` |
+| `ZTransaction`                    | `toSolidityInput()` for `pool.transact`, `encode()`, `nullifiers`, `commitments`                                                                                                   |
+| `TreeUpdateData`                  | `toSolidityInput()` for `pool.updateCommitmentTree`                                                                                                                                |
+| `ShieldedAddressRegistrationData` | `toSolidityInput()` for `pool.registerAddress`                                                                                                                                     |
+
+`toSolidityInput()` returns the struct in the shape the pool ABI expects. Pass it as the single argument.
+
+## Services you supply
+
+`Core` reads the network through four interfaces from the shared-types package.
+
+```ts
+interface ITreeSource {
+  get depth(): number;
+  get root(): bigint;
+  get zeroLeaf(): bigint;
+  update(): void;                     // Core awaits it before it reads root
+  indexOf(leaf: bigint): number;
+  pathElements(index: number): bigint[];
+}
+
+interface INoteSource {
+  getAll(assetId?: number): Promise<INote[]>;
+  getUnspent(assetId?: number): Promise<INote[]>;
+  checkSpent(notes: INote[]): Promise<boolean[]>;
+  chooseForSpending(assetIds: number[], amount: bigint): Promise<INote[]>;
+}
+
+interface IContractSource {
+  getAnnouncements(fromBlock?: number, toBlock?: number): Promise<AnnouncementEvent[]>;
+  getTransactions(fromBlock?: number, toBlock?: number): Promise<any[]>;
+}
+```
+
+What each one must do:
+
+| Service                | Job                                                                                       | Notes                                                                          |
+| ---------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Commitment tree source | Keep a depth-25 Merkle tree of every commitment in leaf order, with zero leaves for gaps. | Core also reads `lastUpdatedLeafIndex` to tell settled notes from queued ones. |
+| Address tree source    | Keep a depth-20 Merkle tree of registered root addresses.                                 | Built from `RegisterAddress` events.                                           |
+| Notes source           | Decrypt the user's notes from announcement memos and drop spent ones by nullifier.        | The reference `SimpleNotesSource` does this from announcements.                |
+| Contract source        | Read announcements and transactions.                                                      | The reference `ContractSource` uses an explorer API.                           |
+
+The Palliora DeFi app reads announcements, commitments and registrations from a subgraph and keeps its own tree sources and caches. The `SimpleTreeSource` in the services package does not implement `update`, so it does not satisfy `ITreeSource` as `Core` uses it. Write your own source for now.
+
+The address resolver is not injectable. `Core` always builds its own from `RegisterAddress` logs. This stops a replaced resolver from sending funds to an address an attacker chose.
+
+## Fee helpers
+
+Exported from the core package.
+
+| Function                                                          | Description                                                                                     |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `quoteUserOpGasCost(params)`                                      | Prices a user operation's maximum cost at the current gas price, plus headroom in basis points. |
+| `quoteUserOpGasCostWithLatestBaseFee(params, client)`             | The same, reading the latest base fee.                                                          |
+| `getPaymasterFee(feeAssetId, paymaster, isPreVerified, client)`   | Reads the paymaster's fee for an asset.                                                         |
+| `getUserOpFeeInFeeAsset(quoteEth, feeAssetId, paymaster, client)` | Converts a native-token quote into the fee asset.                                               |
+| `getRevokerData(id, pool, client)`                                | Reads a revoker.                                                                                |
+| `getCommitmentTreeState(pool, client)`                            | Reads queue and root.                                                                           |
+| `resolveAddressByTx(req, resolver)`                               | Resolves `req.to` for the request type.                                                         |
+| `shouldPreferBundler(req, options)`                               | The rule that picks the bundler path.                                                           |
+
+`DEFAULT_USER_OP_FEE_HEADROOM_BPS` is the default headroom in basis points.
+
+## Supported networks
+
+The SDK keeps a list of chains. `Core` throws `Unsupported chainId <id>` for any other. In 1.4.3 the list covers Ethereum mainnet and Sepolia, with a few development networks. HyperEVM (chain ids 998 and 999) is not in the published list. A build with HyperEVM is `[SDK_VERSION_WITH_HYPEREVM]`. That build also adds `relayed` and `relayFee` to `TransactionOptions`, for relayers that submit `pool.transact` directly.
+
+## Next
+
+* [Quickstart](/defi/build/quickstart)
+* [Troubleshooting](/defi/build/troubleshooting)

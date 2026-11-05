@@ -1,0 +1,58 @@
+---
+title: "Shielded transactions"
+---
+
+A shielded transaction spends some notes and creates others. A zero-knowledge proof shows the transaction is valid. The pool checks the proof, and never sees the notes.
+
+## Four kinds
+
+| Kind         | What it does                                                                         | What becomes public                                 |
+| ------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| Deposit      | Moves tokens from your wallet into the pool and creates notes worth that amount.     | Your wallet, the token and the amount               |
+| Transfer     | Spends your notes and creates notes for someone else. No tokens leave the pool.      | Only the fee token and amount                       |
+| Withdraw     | Spends your notes and sends tokens to a public address.                              | The receiving address, the token and the amount     |
+| Adaptor call | Spends your notes, sends tokens to an adaptor, and turns the result back into notes. | The adaptor, the tokens in and out, and the payload |
+
+A deposit carries no fee. You pay its gas from your wallet. For the other kinds, the fee comes out of the transaction. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas).
+
+## Shapes
+
+The circuit depends on how many notes a transaction spends and creates. The pool has one verifier per shape.
+
+| Notes spent | Notes created |
+| ----------- | ------------- |
+| Up to 2     | 1, 2 or 3     |
+| Up to 4     | 2 or 4        |
+| Up to 8     | 2 or 4        |
+
+The app picks the smallest shape that fits. Unused slots hold empty notes, with zero value and zero token id. The proof skips the tree check for them.
+
+## What the proof shows
+
+The proof is made on your device. It shows that:
+
+1. Every spent note is in the commitment tree, and you know its contents.
+2. You own each spent note, by a valid signature from your sign key over the transaction.
+3. Each revealed nullifier is computed correctly from its note.
+4. Each new commitment is computed correctly.
+5. The value balances: notes spent, plus tokens put in, equals notes created, plus tokens taken out.
+6. A seed for disclosure is encrypted correctly to the disclosure key. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+7. The account making the transaction is registered. Its root address is in the address tree, and the proof does not say which entry.
+
+## What the pool checks
+
+When a transaction arrives, the pool:
+
+1. Checks that the commitment-tree root and the address-tree root are ones it knows.
+2. Checks that no nullifier has been used before.
+3. Checks the amounts and tokens that become public, and the deposit limits.
+4. Checks the proof with the verifier for the transaction's shape.
+5. Records the nullifiers, puts the new commitments in the queue, and moves any tokens. Only then is the transaction final.
+
+On Ethereum the pool also screens the depositor against a sanctions list. Every value the circuit works with must be a valid field element, and a transaction with any value outside that range is rejected.
+
+## Next
+
+* [Relaying and gas](/defi/learn/concepts/relaying-and-gas)
+* [Adaptors](/defi/learn/concepts/adaptors)
+* [Privacy model](/defi/learn/concepts/privacy-model)

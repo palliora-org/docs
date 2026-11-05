@@ -1,0 +1,102 @@
+---
+title: "Call a model"
+---
+
+This guide is public (plaintext): the prompt and the answer are visible on the testnet ledger. For the private version, see [Encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md).
+
+A complete script that submits a plain inference request and prints the answer. This is the [Quickstart](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/quickstart.md) pattern as a real file you can save and run, with the error handling a one-off terminal session doesn't need but a script should have.
+
+```ts
+// call-a-model.mjs
+import {
+  init,
+  getKeyring,
+  getGuardianAddress,
+  inferenceCompute,
+  getApi,
+  scanForBlockEvent,
+  fetchAndDecodeExtrinsic,
+} from "@palliora.org/chainsdk";
+
+const PALLIORA_WS = process.env.PALLIORA_WS ?? "wss://staging.manas-rpc.palliora.org";
+const MODEL = process.env.MODEL ?? "gemma3:1b"; // confirmed-working curated model
+const PROMPT = process.argv[2] ?? "What is 2 + 2? Answer in one word.";
+
+async function main() {
+  init({ pallioraWs: PALLIORA_WS });
+
+  const keyring = await getKeyring();
+  const account = keyring.addFromUri("//Bob"); // dev-only, replace for real use
+
+  const guardians = await getGuardianAddress();
+  if (guardians.length < 3) {
+    throw new Error(`Need at least 3 guardians, found ${guardians.length}`);
+  }
+  const selected = guardians.slice(0, 3).map((g) => g.address);
+
+  const result = await inferenceCompute(
+    {
+      input: JSON.stringify({
+        model: MODEL,
+        messages: [{ role: "user", content: PROMPT }],
+        stream: false,
+      }),
+      guardians: selected,
+      fee: { amount: 0.05, computeRate: 0.00002 },
+      deadline: 0,
+    },
+    account,
+  );
+
+  console.log(`Agreement ${result.agreementId} submitted at block ${result.blockNumber}, waiting for result...`);
+
+  const api = await getApi();
+  const match = await scanForBlockEvent(
+    api,
+    {
+      predicate: async (block, _event, phase) => {
+        if (!block || !phase.isApplyExtrinsic) return false;
+        const ext = block.block.extrinsics[phase.asApplyExtrinsic.toNumber()];
+        if (
+          ext?.method?.section?.toLowerCase() !== "compute" ||
+          ext?.method?.method?.toLowerCase() !== "result"
+        ) {
+          return false;
+        }
+        const emitted =
+          "0x" +
+          Array.from(ext.method.args[0])
+            .map((b) => ("0" + (b & 0xff).toString(16)).slice(-2))
+            .join("");
+        return emitted === result.agreementId;
+      },
+    },
+    result.blockNumber + 1,
+    300, // real inference can take longer than the 20-block default
+  );
+
+  const { decoded } = await fetchAndDecodeExtrinsic(match.blockNumber, match.extrinsicIndex ?? 0);
+  const inputField = decoded.method.args.contract.compute.input.Inline.data;
+  const plainBytes = Buffer.from(inputField.slice(2), "hex");
+
+  console.log("Answer:", new TextDecoder().decode(plainBytes));
+  process.exit(0);
+}
+
+main().catch((err) => {
+  console.error("Failed:", err.message);
+  process.exit(1);
+});
+```
+
+Run it:
+
+```bash
+node call-a-model.mjs "What's the capital of France?"
+```
+
+A few things worth knowing before you adapt this:
+
+* `//Bob` is a dev-only account built into the SDK. It works out of the box against the testnet but it's shared and unsuited to anything real. Swap in your own signer, see [SDK Reference: accounts](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/reference/sdk-reference.md#accounts-and-keyring).
+* The 300-block wait window is generous on purpose. Real inference on a curated small model took longer than the SDK's 20-block default in practice; 300 is a safe margin, not a guarantee.
+* This path is plaintext end to end: no party's identity or content is hidden here, only the execution is coordinated through a Compute Contract. If your prompt or the model's answer needs to stay private, see [Encrypted Compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md) instead.

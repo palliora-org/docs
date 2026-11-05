@@ -1,0 +1,95 @@
+---
+title: "Quickstart"
+---
+
+Ask Palliora a question, get a real answer back. Copy the script below, run one command, done.
+
+This first script is deliberately public: your question and the answer are visible on the testnet ledger, so you can watch every step of a Compute Contract happen. Once it works, [Encrypted compute](/build/guides/encrypted-compute) shows the same flow with your question and answer encrypted.
+
+```bash
+npm install @palliora.org/chainsdk
+```
+
+```js
+// ask.mjs
+import {
+  init,
+  getKeyring,
+  getGuardianAddress,
+  inferenceCompute,
+  getApi,
+  scanForBlockEvent,
+  fetchAndDecodeExtrinsic,
+} from "@palliora.org/chainsdk";
+
+init({ pallioraWs: "wss://staging.manas-rpc.palliora.org" });
+
+const keyring = await getKeyring();
+const account = keyring.addFromUri("//Bob"); // built-in test account, free to use here
+
+const guardians = (await getGuardianAddress()).slice(0, 3).map((g) => g.address);
+
+const result = await inferenceCompute(
+  {
+    input: JSON.stringify({
+      model: "gemma3:1b",
+      messages: [{ role: "user", content: process.argv[2] ?? "What is 2 + 2?" }],
+      stream: false,
+    }),
+    guardians,
+    fee: { amount: 0.05, computeRate: 0.00002 },
+    deadline: 0,
+  },
+  account,
+);
+
+const api = await getApi();
+const match = await scanForBlockEvent(
+  api,
+  {
+    predicate: async (block, _event, phase) => {
+      if (!block || !phase.isApplyExtrinsic) return false;
+      const ext = block.block.extrinsics[phase.asApplyExtrinsic.toNumber()];
+      if (ext?.method?.section?.toLowerCase() !== "compute" || ext?.method?.method?.toLowerCase() !== "result") return false;
+      const emitted = "0x" + Array.from(ext.method.args[0]).map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+      return emitted === result.agreementId;
+    },
+  },
+  result.blockNumber + 1,
+  300,
+);
+
+const { decoded } = await fetchAndDecodeExtrinsic(match.blockNumber, match.extrinsicIndex ?? 0);
+const plainBytes = Buffer.from(decoded.method.args.contract.compute.input.Inline.data.slice(2), "hex");
+
+console.log(new TextDecoder().decode(plainBytes));
+process.exit(0);
+```
+
+```bash
+node ask.mjs "What's the capital of France?"
+```
+
+A few seconds later, a real answer prints to your terminal. That's it, you just ran a question through a Compute Contract on Palliora's testnet.
+
+Guardians run a small, curated set of models: `gemma3:1b`, `deepseek-r1:1.5b`, `llama3.2:1b` and `qwen3:0.6b`. Any other model submits fine and fails at execution.
+
+## What just happened
+
+That one script did three things: connected to Manas (Palliora's public testnet), created a Compute Contract naming three Guardians, the model and the fee, and read the answer back once it was ready. You didn't have to run any infrastructure yourself.
+
+Because this run is plaintext, anyone looking at the ledger can see the question and the answer. The privacy comes in the next step: [Encrypted compute](/build/guides/encrypted-compute) encrypts the input to a Guardian group and returns the answer encrypted to you.
+
+If you want to understand the mechanism behind this (what a Compute Contract is, why it takes a few seconds, who gets paid), see [How Palliora Works](/learn/how-it-works). If you want a version of this script with proper error handling and configuration, the kind you'd actually keep in a project, see [Call a model](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/ai/build/guides/call-a-model.md).
+
+## If it didn't work
+
+Check [Troubleshooting](/build/reference/troubleshooting), most failures here are network behavior you can work around, not bugs in your code.
+
+## Next
+
+* [Encrypted compute](/build/guides/encrypted-compute): the same call, private.
+* [Guides](/build/guides) for storing data and publishing a model or workload.
+* [Palliora AI: Build](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/ai/build/README.md) for wrapping this pattern behind a familiar chat-completions-compatible API.
+* [SDK reference](/build/reference/sdk-reference) for the full exported surface.
+* [Build with a coding agent](/build/coding-agents/build-with-a-coding-agent) if you'd rather hand this whole thing to an AI coding agent.

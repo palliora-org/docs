@@ -5,3 +5,6 @@
 # Draft content
 drafts/
 *.draft.mdx
+
+# Raw downloadable attachment (served from GitHub, not a docs page)
+files/palliora.skill.md

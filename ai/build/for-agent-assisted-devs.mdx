@@ -1,0 +1,35 @@
+---
+title: "For agent-assisted developers"
+---
+
+More and more code against these docs is written by an AI coding agent on a person's behalf. This page says what an agent can rely on when building on Palliora AI specifically, and where it must not guess.
+
+This is the Palliora AI-specific companion to the core [For agent-assisted developers](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/coding-agents/for-agent-assisted-devs.md) page. Read that one first; it covers the chain SDK generally. This page covers only what's specific to calling models.
+
+## What to rely on
+
+* The code blocks in [Call a model](/ai/build/call-a-model), [Build a chat-completions-compatible service](/ai/build/chat-completions-service) and [Encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md) are runnable as written against the live testnet, not illustrative pseudocode.
+* Known gaps are stated as gaps, not glossed over. The guardian result-key lookup problem in Encrypted Compute is a real, current limitation with a documented workaround, not something more reading will find a hidden fix for.
+
+## Do not guess
+
+| Topic                          | The trap                                                                    | The fact                                                                                                                                                                                                                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Which model to use             | Assuming any model name works                                               | Guardians run a small, curated Ollama set: `gemma3:1b`, `deepseek-r1:1.5b`, `llama3.2:1b`, `qwen3:0.6b`. Any other model submits fine and fails at execution.                                                                                                                     |
+| Getting the answer             | Expecting `inferenceCompute` to return it                                   | It returns an agreement ID and block number. The answer lands later as a separate `compute.result` extrinsic you poll for.                                                                                                                                                        |
+| Poll window                    | Using the SDK's 20-block default                                            | Real inference can take longer. Give it 300 blocks.                                                                                                                                                                                                                               |
+| Guardian result-encryption key | Reading `staking.guardians(address).pubKey` as the Ed25519 decryption key   | That field is the guardian's sr25519 signing key. Feeding it to `gen_shared_key` throws. See [Encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md#the-known-rough-edge-finding-nodepub) for the real workaround. |
+| Signing                        | Shipping `//Bob` (the dev-only account in every example) into anything real | It's shared and unsuited to production. Swap in a per-user signer before anything beyond a demo.                                                                                                                                                                                  |
+| Privacy                        | Assuming any of the plain guides hide the prompt                            | [Call a model](/ai/build/call-a-model) and the chat-completions example are both plaintext end to end. Only [Encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md) hides the input.                            |
+
+## Read these first
+
+1. [`palliora-ai.skill.md`](/ai/build/palliora-ai.skill), a condensed version of this page plus the call pattern and common failures in one file.
+2. [Call a model](/ai/build/call-a-model), the fastest path to a working call against the live testnet.
+3. [Encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md) before assuming a prompt is private just because it reached a Compute Contract.
+
+## Safety rules for agents
+
+* Never run against mainnet with a real wallet without the person's go-ahead.
+* Don't hardcode the dev-only `//Bob` account into anything meant to run for real users.
+* Don't invent a `nodePub` value. If it isn't in the known-good map, say so instead of guessing one.

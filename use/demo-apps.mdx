@@ -1,0 +1,38 @@
+---
+title: "Try the Demo Apps"
+---
+
+Palliora DeFi has a hosted demo app on Manas, Palliora's public testnet. It shows what an integration looks like. Production use goes through the SDK, see [Palliora DeFi](/products/palliora-defi).
+
+The demo is at app.veilnyx.com for now, and the app may still show its former name, Veilnyx. The URL will change.
+
+| What you can try                                                        | Link                                                         |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Create a private account, deposit test tokens, send a shielded transfer | [app.veilnyx.com/discover](https://app.veilnyx.com/discover) |
+
+This walks through connecting a wallet, creating a private account, depositing tokens, and sending a shielded transfer. The demo covers transfers only. Palliora DeFi itself is live on testnet on Hyperliquid and Ethereum, see [Palliora DeFi](/products/palliora-defi).
+
+### Set up your account
+
+1. **Open the app.** Go to [app.veilnyx.com/discover](https://app.veilnyx.com/discover) to see all supported applications and protocols.
+2. **Connect your wallet.** On the Home tab, first-time users connect a non-custodial wallet (MetaMask, WalletConnect, or similar).
+3. **Register your wallet.** Once connected, a Register modal appears. Click **Register** to link your wallet to Palliora DeFi.
+4. **Generate your shielded account.** You'll be asked to sign a wallet message, an app-specific signature, not a transaction, that generates your unique shielded account. Every private transaction needs this.
+5. **Review how disclosure works.** Before you use your shielded account, the app asks you to confirm how disclosure works. Your activity stays private. It can only be revealed to answer a signed, publicly logged request approved by independent Guardians, and only the record that request covers. See [Accountable privacy](/learn/concepts/accountable-privacy).
+
+### Deposit tokens
+
+6. **Deposit tokens.** Once your shielded account exists, deposit tokens from your regular wallet (EOA) into it. This moves your funds into the privacy layer.
+7. **Wait for the balance to settle.** A deposited balance may sit in a "Pending" state before it's usable. It moves to "Spending" (or "Available") either automatically after a short period, or when you trigger a settle-balance action in the app.
+
+### Send privately
+
+8. **Send.** Once your balance is in the Spending state, you can send tokens privately. The recipient also needs their own registered shielded account to receive a private transfer.
+
+### What the world sees
+
+The transfer is recorded publicly. Who sent it, who received it, and their balances stay private. They can be revealed only through the due process described in [Accountable privacy](/learn/concepts/accountable-privacy). No single party, not the revoker and not any one Guardian, can unmask anyone on its own.
+
+## Looking for the Palliora AI demo?
+
+It has its own page, see [Try the demo app](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/ai/use/demo-apps.md).

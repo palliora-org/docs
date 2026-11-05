@@ -1,54 +1,225 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Palliora",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#346DDB",
+    "light": "#508BFC",
+    "dark": "#346DDB"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "/favicon.png",
   "logo": {
     "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "dark": "/logo/dark.svg",
+    "href": "/"
   },
-  "navbar": {
-    "links": [
+  "navigation": {
+    "tabs": [
       {
-        "label": "Support",
-        "href": "mailto:support@mintlify.com"
+        "tab": "Core",
+        "pages": [
+          "index",
+          "why-palliora",
+          {
+            "group": "Learn",
+            "pages": [
+              "learn/how-it-works",
+              "learn/where-palliora-runs",
+              {
+                "group": "Concepts",
+                "root": "learn/concepts",
+                "pages": [
+                  "learn/concepts/compute-contracts",
+                  "learn/concepts/accountable-privacy",
+                  "learn/concepts/compute-artifacts",
+                  "learn/concepts/guardian",
+                  "learn/concepts/validator",
+                  "learn/concepts/confidential-compute",
+                  "learn/concepts/data-availability",
+                  "learn/concepts/threshold-encryption",
+                  "learn/concepts/actors-and-roles",
+                  "learn/concepts/fees-and-incentives",
+                  "learn/concepts/pali-token",
+                  "learn/concepts/glossary"
+                ]
+              },
+              "learn/security-and-limitations",
+              "learn/status-and-roadmap"
+            ]
+          },
+          {
+            "group": "Products",
+            "pages": [
+              "products/products",
+              "products/palliora-defi",
+              "products/palliora-ai",
+              "products/use-cases"
+            ]
+          },
+          {
+            "group": "Build",
+            "pages": [
+              "build/build",
+              "build/quickstart",
+              {
+                "group": "Guides",
+                "root": "build/guides",
+                "pages": [
+                  "build/guides/encrypted-compute",
+                  "build/guides/store-data",
+                  "build/guides/compute-artifacts"
+                ]
+              },
+              {
+                "group": "Reference",
+                "root": "build/reference",
+                "pages": [
+                  "build/reference/sdk-reference",
+                  "build/reference/indexer-reference",
+                  "build/reference/palliora-cli",
+                  "build/reference/network-reference",
+                  "build/reference/troubleshooting"
+                ]
+              },
+              {
+                "group": "Coding Agents",
+                "root": "build/coding-agents",
+                "pages": [
+                  "build/coding-agents/build-with-a-coding-agent",
+                  "build/coding-agents/for-agent-assisted-devs",
+                  "build/coding-agents/palliora.skill"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Use",
+            "pages": [
+              "use/use",
+              "use/account-management",
+              "use/get-test-tokens",
+              "use/upload-your-data",
+              "use/demo-apps"
+            ]
+          },
+          {
+            "group": "Participate",
+            "pages": [
+              "participate/participate",
+              "participate/become-a-guardian",
+              "participate/become-a-validator",
+              "participate/run-a-node-on-a-tee"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/faq"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "DeFi",
+        "pages": [
+          "defi/index",
+          {
+            "group": "Learn",
+            "pages": [
+              "defi/learn/how-it-works",
+              {
+                "group": "Concepts",
+                "root": "defi/learn/concepts",
+                "pages": [
+                  "defi/learn/concepts/shielded-accounts",
+                  "defi/learn/concepts/notes-and-commitments",
+                  "defi/learn/concepts/shielded-transactions",
+                  "defi/learn/concepts/relaying-and-gas",
+                  "defi/learn/concepts/adaptors",
+                  "defi/learn/concepts/accountable-privacy-and-disclosure",
+                  "defi/learn/concepts/palliora-integration",
+                  "defi/learn/concepts/private-sub-accounts",
+                  "defi/learn/concepts/cryptographic-primitives",
+                  "defi/learn/concepts/privacy-model"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Build",
+            "pages": [
+              "defi/build/build",
+              "defi/build/quickstart",
+              "defi/build/sdk-reference",
+              "defi/build/integrate-a-protocol",
+              "defi/build/private-sub-accounts-sdk",
+              "defi/build/relayer-api",
+              "defi/build/troubleshooting",
+              "defi/build/for-agent-assisted-devs",
+              "defi/build/palliora-defi.skill"
+            ]
+          },
+          {
+            "group": "Participate",
+            "pages": [
+              "defi/participate/participate",
+              "defi/participate/run-a-decom-guardian",
+              "defi/participate/guardian-key-operations"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "defi/reference/network-reference",
+              "defi/reference/status-and-limits",
+              "defi/reference/fees",
+              "defi/reference/security-and-audits",
+              "defi/reference/zk-ceremony",
+              "defi/reference/rename-map",
+              "defi/reference/changelog",
+              "defi/reference/faq",
+              "defi/reference/glossary"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "AI",
+        "pages": [
+          "ai/index",
+          {
+            "group": "Learn",
+            "pages": [
+              {
+                "group": "Concepts",
+                "root": "ai/learn/concepts",
+                "pages": [
+                  "ai/learn/concepts/core-concepts",
+                  "ai/learn/concepts/tool-calls-and-agent-runs",
+                  "ai/learn/concepts/provenance"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Build",
+            "pages": [
+              "ai/build/build",
+              "ai/build/call-a-model",
+              "ai/build/chat-completions-service",
+              "ai/build/for-agent-assisted-devs",
+              "ai/build/palliora-ai.skill"
+            ]
+          },
+          {
+            "group": "Use",
+            "pages": [
+              "ai/use/demo-apps"
+            ]
+          }
+        ]
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
-    }
+    ]
   },
   "contextual": {
     "options": [
@@ -61,12 +232,5 @@
       "cursor",
       "vscode"
     ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
   }
 }

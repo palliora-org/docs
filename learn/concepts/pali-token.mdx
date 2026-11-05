@@ -1,0 +1,21 @@
+---
+title: "PALI Token"
+---
+
+PALI is Palliora's native token. It pays for private computation, secures the Guardian network and the coordination ledger, and gives every role a financial reason to follow the rules.
+
+## What PALI is used for
+
+| Use                    | How                                                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Paying for computation | Compute Contract fees are settled in PALI on the network. End users of products built on Palliora don't need to hold it. See [Fees and incentives](/learn/concepts/fees-and-incentives). |
+| Staking                | Guardians and validators stake PALI as collateral. Misbehavior can be slashed.                                                                                                              |
+| Rewards                | Guardians, compute nodes, verifiers and validators earn PALI for their work.                                                                                                                |
+| Product fees           | Customers of Palliora DeFi and Palliora AI pay in fiat or stablecoins. PALI works in the background to settle the computation underneath.                                                   |
+| Governance             |                                                                                                                                                                                             |
+
+## Testnet PALI
+
+PALI on Manas is a testnet token with no value. Claim it from the faucet, see [Get test tokens](/use/get-test-tokens).
+
+The SDK uses 18 decimals: `tokenToBigint("100")` turns 100 PALI into on-chain units. The CLI takes whole numbers in milliPALI, so `--amount 1000000` means 1,000 PALI.

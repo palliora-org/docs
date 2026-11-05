@@ -1,0 +1,63 @@
+---
+title: "Rename map"
+---
+
+Palliora DeFi was called Veilnyx before. Older pages, posts and code still use the old names. This page maps each old name to the new one, and lists the few places where the old name stays on purpose.
+
+## Names
+
+| Old                                    | New                             | Notes                                                                                |
+| -------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------ |
+| Veilnyx                                | Palliora DeFi                   | The product. Pages say "formerly Veilnyx" on first mention.                          |
+| Veilnyx app                            | Palliora DeFi app               | It is live at [defi.palliora.org](https://defi.palliora.org).                        |
+| Veilnyx SDK                            | Palliora DeFi SDK               | See Packages below.                                                                  |
+| `Burner`, `burner wallet`              | Private Sub-account             | The app labels it Sub-account. Code keeps `burner`.                                  |
+| `Compliance`, `involuntary compliance` | Accountable privacy, disclosure | Prose only.                                                                          |
+| Open a transaction                     | De-anonymize a transaction      | Prose only.                                                                          |
+| Guardian                               | Decom guardian                  | A Decom guardian holds a share of the disclosure key. It is not a Palliora Guardian. |
+
+A Decom guardian belongs to the disclosure network of Palliora DeFi. A Palliora Guardian belongs to Palliora's silent threshold encryption. They are different roles. See [Glossary](/defi/reference/glossary).
+
+## Packages
+
+The SDK packages move from the `@veilnyx-sdk` scope to `@palliora.org/defi-*`. The new names are the ones used across these pages. Until the new packages are published, install the old names and change only the import paths.
+
+| New name                          | Old name                    |
+| --------------------------------- | --------------------------- |
+| `@palliora.org/defi-core`         | `@veilnyx-sdk/core`         |
+| `@palliora.org/defi-account`      | `@veilnyx-sdk/account`      |
+| `@palliora.org/defi-transaction`  | `@veilnyx-sdk/transaction`  |
+| `@palliora.org/defi-zk-prover`    | `@veilnyx-sdk/zk-prover`    |
+| `@palliora.org/defi-services`     | `@veilnyx-sdk/services`     |
+| `@palliora.org/defi-shared-types` | `@veilnyx-sdk/shared-types` |
+| `@palliora.org/defi-babyjubjub`   | `@veilnyx-sdk/babyjubjub`   |
+| `@palliora.org/defi-utils`        | `@veilnyx-sdk/utils`        |
+
+See [SDK reference](/defi/build/sdk-reference) for what each package holds.
+
+## Where the old name stays
+
+Some strings are part of the deployed contracts, or they are inputs to keys. A change would break accounts or make deployed code fail a byte-for-byte check. They keep their original text.
+
+| Item                                                                                                      | Where you see it                                   | Why it stays                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The wallet message "Sign this message to generate your Veilnyx shielded account."                         | The prompt your wallet shows when you open the app | Your signature of this text seeds your shielded keys. A different text makes a different account. The prompt also tells you to sign only in apps "affiliated with Veilnyx". The Palliora DeFi app is that app. |
+| Sub-account key contexts `veilnyx/hl-burner/v1/` (test) and `veilnyx/hl-burner/m1/` (mainnet)             | The SDK and the app                                | They are key material. A change derives other addresses, and funds on the old ones are stranded.                                                                                                               |
+| The EIP-712 domain name `Veilnyx`, version `1`                                                            | The pool, in registration signatures               | It is part of the deployed code. Use it exactly as it is when you sign typed data.                                                                                                                             |
+| `veilnyxPool` and `setVeilnyxPool`                                                                        | The adaptor handler contract                       | Deployed names.                                                                                                                                                                                                |
+| `FeeAssetNotSupportedByVeilnyx`                                                                           | A Paymaster error                                  | A deployed name.                                                                                                                                                                                               |
+| `burner` in `deriveBurner`, `assertBurnerUnused`, `submitFrom: 'burner'` and the relayer's `burner` field | The SDK and the relayer API                        | Code identifiers keep their original names. Prose says Private Sub-account.                                                                                                                                    |
+| "Veilnyx Security Group"                                                                                  | The metadata registered for revoker 0              | Registered metadata cannot be edited.                                                                                                                                                                          |
+| Circuit, key and verifier names                                                                           | The ceremony files and the verifier contracts      | Checks compare them byte for byte. See [ZK ceremony](/defi/reference/zk-ceremony).                                                                                                                          |
+| Comments in the contract source                                                                           | The source of the deployed contracts               | A change to a comment changes the compiled metadata, and the deployed code could no longer be matched to the source.                                                                                           |
+
+## Older links
+
+Older material may point to Veilnyx or Labyrinth sites. If a link no longer works, look for the same page under Palliora DeFi. The relayer on HyperEVM also still answers at its older address. See [Network reference](/defi/reference/network-reference).
+
+The security contact is **[security@palliora.org](mailto:security@palliora.org)**. Older repositories may still list a Veilnyx address.
+
+## Next
+
+* [Changelog](/defi/reference/changelog)
+* [Glossary](/defi/reference/glossary)

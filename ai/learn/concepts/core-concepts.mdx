@@ -1,0 +1,12 @@
+---
+title: "Core concepts"
+---
+
+Palliora AI is built directly on Palliora's core primitives, not a separate protocol. These are the ones worth reading before you go deeper into Palliora AI specifically. Full explanations live in [Learn](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/README.md); this page is just a map.
+
+* [**Compute Contracts**](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/compute-contracts.md) — every model call and tool call is one of these: what runs, on what input, under what terms, agreed before execution starts. The mechanism behind [tool calls and agent runs](/ai/learn/concepts/tool-calls-and-agent-runs) and [provenance](/ai/learn/concepts/provenance).
+* [**Guardian**](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/guardian.md) — the nodes that coordinate access to encrypted inputs, run confidential compute, and enforce a contract's terms as a quorum. The Guardian running a model inside a TEE is a Guardian doing this job.
+* [**Confidential compute**](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/confidential-compute.md) — the TEE execution mode Palliora AI uses to keep a prompt private from the compute node's own operator, not just from other participants.
+* [**Threshold encryption**](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/threshold-encryption.md) — how a prompt stays encrypted until a Guardian quorum decrypts it inside the compute pipeline. The mechanism behind [encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md).
+* [**Accountable privacy**](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/accountable-privacy.md) — Palliora's broader privacy model: sealed by default, revealed only through due process. Palliora AI inherits this rather than defining its own.
+* [**Fees and incentives**](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/fees-and-incentives.md) — how a Compute Contract is priced and who gets paid, including for an inference request.

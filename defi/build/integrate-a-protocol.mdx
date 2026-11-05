@@ -1,0 +1,157 @@
+---
+title: "Integrate a DeFi protocol"
+---
+
+An adaptor lets a user reach your protocol from a shielded balance. Your protocol does not change. You write one small contract that turns tokens in into tokens out, and the pool owner registers it.
+
+Read [Adaptors](/defi/learn/concepts/adaptors) first for the idea. This page is the how-to.
+
+## What an adaptor must do
+
+| Rule                                              | Why                                                                                                                                                                              |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extend `AdaptorBase` and implement `handleAssets` | The handler calls this one function.                                                                                                                                             |
+| Hold no storage                                   | The handler calls the adaptor with `delegatecall`, so the adaptor runs in the handler's storage. Any storage write would land there. Use `immutable` and `constant` values only. |
+| Take the tokens from the handler's balance        | In a `delegatecall`, `address(this)` is the handler. The pool has already sent the input tokens to it.                                                                           |
+| Return every output token as an `AssetAmount`     | The handler turns each one into a note for the user.                                                                                                                             |
+| Return only tokens that are active pool assets    | The handler reverts on an inactive asset.                                                                                                                                        |
+| Hold at least the amount you return               | The handler checks its balance for each output.                                                                                                                                  |
+
+The interface:
+
+```solidity
+// From the protocol source.
+struct AssetAmount {
+    uint24 assetId;
+    uint256 value;
+}
+
+abstract contract IAdaptor {
+    function handleAssets(
+        AssetAmount[] calldata inAssets,
+        bytes calldata payload
+    ) external payable virtual returns (AssetAmount[] memory outAssets);
+}
+```
+
+`AdaptorBase` gives you the pool lookups. `getAsset(assetId)` and `getAssetId(address)` revert if the asset is not active, so you do not need to check that yourself. It also defines the errors `ZeroValue`, `UnsupportedAsset` and `InvalidInputAssetLength`.
+
+## Write the adaptor
+
+This example deposits into an ERC-4626 vault and redeems from it. It compiles against the protocol repo. It has not been run against a pool, so treat it as a starting point and not as an audited adaptor.
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.24;
+
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {AdaptorBase} from "../../base/AdaptorBase.sol";
+import {AssetAmount} from "../../interfaces/IAdaptor.sol";
+import {IPool} from "../../interfaces/IPool.sol";
+
+contract VaultAdaptor is AdaptorBase {
+    using SafeERC20 for IERC20;
+
+    enum Action {
+        DEPOSIT,
+        REDEEM
+    }
+
+    IERC4626 public immutable vault;
+
+    constructor(IERC4626 vault_, IPool pool_) AdaptorBase(pool_) {
+        vault = vault_;
+    }
+
+    function handleAssets(
+        AssetAmount[] calldata inAssets,
+        bytes calldata payload
+    ) external payable override returns (AssetAmount[] memory outAssets) {
+        if (inAssets.length != 1) {
+            revert InvalidInputAssetLength(uint8(inAssets.length), 1);
+        }
+        if (inAssets[0].value == 0) revert ZeroValue();
+
+        (Action action, uint256 minOut) = abi.decode(payload, (Action, uint256));
+        address inToken = getAsset(inAssets[0].assetId).assetAddress;
+
+        address outToken;
+        uint256 outValue;
+        if (action == Action.DEPOSIT) {
+            if (inToken != vault.asset()) revert UnsupportedAsset(inAssets[0].assetId);
+            IERC20(inToken).forceApprove(address(vault), inAssets[0].value);
+            outValue = vault.deposit(inAssets[0].value, address(this));
+            outToken = address(vault);
+        } else {
+            if (inToken != address(vault)) revert UnsupportedAsset(inAssets[0].assetId);
+            outValue = vault.redeem(inAssets[0].value, address(this), address(this));
+            outToken = vault.asset();
+        }
+        if (outValue < minOut) revert InsufficientBalance();
+
+        outAssets = new AssetAmount[](1);
+        outAssets[0] = AssetAmount(getAssetId(outToken), outValue);
+    }
+}
+```
+
+Points that matter:
+
+* **Slippage.** Put a minimum output in the payload and revert below it, as `minOut` does here. The Uniswap adaptor does the same. Nobody else will protect the user.
+* **Recipient.** Return outputs to `address(this)`, the handler, so the pool turns them into notes for the user. The Uniswap adaptor also accepts a `beneficiary` address. If it is set, the swap pays that public address and the adaptor returns no outputs. That sends the result outside the pool and shows the destination.
+* **Payload.** Keep it small and make it decode in one `abi.decode`. The payload is public.
+* **One input asset** is the common case. The handler can pass several, but each extra input asset needs its own check in your code.
+* **Anything that cannot finish in one call** leaks. The Lido unstake path asks for a `withdrawAddress` because Lido queues the withdrawal and pays later. Say so in your adaptor's notes.
+
+## Register it
+
+Only the pool owner can register an adaptor, with `addAdaptorSupport`. The pool checks the adaptor address named in the transaction against that list and rejects any other. Output tokens must already be active assets in the pool, and the owner adds them with the pool's asset functions. How to ask for both: `[ADAPTOR_ONBOARDING_PROCESS]`.
+
+Adaptors are stateless, so registering a new one does not need an upgrade of the pool.
+
+## Call it from the SDK
+
+An adaptor call is a `CALL_ADAPTER` transaction. `to` is the adaptor address. `assetIds` and `values` are the tokens you send in. `payload` is what your `handleAssets` decodes.
+
+```ts
+import { encodeAbiParameters, parseAbiParameters, Hex } from 'viem';
+import { TransactionType } from '@palliora.org/defi-shared-types';
+
+// Illustrative. `core` is built as in the quickstart.
+const VAULT_ADAPTOR = '[VAULT_ADAPTOR_ADDRESS]' as Hex;
+
+const payload = encodeAbiParameters(
+  parseAbiParameters('uint8 action, uint256 minOut'),
+  [0, 9_900_000n], // DEPOSIT, with a minimum of 9.9 shares
+);
+
+const tx = await core.createTransaction(
+  {
+    type: TransactionType.CALL_ADAPTER,
+    assetIds: [65538],
+    values: [10_000_000n],
+    feeAssetId: 65538, // pay the fee from the same asset on the relayed path
+    to: VAULT_ADAPTOR,
+    payload,
+  },
+  { revokerId: 0, viaBundler: true, userOpFeeQuoteEth: 0n /* quote this */ },
+);
+```
+
+You sign, prove and submit it as in the [quickstart](/defi/build/quickstart). The SDK sets the refund address for you. It is a blinded form of the user's own address, so the output notes belong to the user and nobody can link them to the user's public address.
+
+Two things to plan for:
+
+* **Gas.** An adaptor call runs your code and the protocol's code in one transaction. On the bundler path, pass a larger `callGasLimit` than a plain transfer needs. A vault deposit needs more than a swap. The app sets this per adaptor.
+* **Public data.** The input tokens, the amounts, the adaptor and the payload are public. The output amounts are public too, because the pool builds the output notes from what the adaptor returns.
+
+## Test it
+
+The protocol repo tests each adaptor against a fork of the network it targets. A test deploys the adaptor at the fixed address that a recorded proof names, sends that shielded transaction through a pool fixture and checks the result. The proof binds the adaptor address, so a new adaptor needs a new recorded proof. Add a test in the same style under `test/adaptors/`.
+
+## Next
+
+* [SDK reference](/defi/build/sdk-reference) for `TransactionRequest` and `TransactionOptions`.
+* [Troubleshooting](/defi/build/troubleshooting) for adaptor errors.

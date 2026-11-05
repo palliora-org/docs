@@ -1,0 +1,278 @@
+---
+title: "Private Sub-accounts SDK"
+---
+
+This page shows how to build the Private Sub-account flow on HyperEVM mainnet: derive a Sub-account, fund it from a shielded balance, trade from it, and bring the money back. Read [Private Sub-accounts](/defi/learn/concepts/private-sub-accounts) first for what the flow does and what it keeps private.
+
+## Where the code is
+
+There is no published package for this flow yet. The pieces live in two places:
+
+| Piece                              | Where                 | Notes                                                                                                                                |
+| ---------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Shielded transactions              | The core SDK          | The same `Core` as in the [quickstart](/defi/build/quickstart), on a build that supports HyperEVM: `[SDK_VERSION_WITH_HYPEREVM]`. |
+| Funding the Sub-account on mainnet | The Palliora DeFi app | An adaptor call. The snippet below shows the shape.                                                                                  |
+| Derivation, trading and return     | The Palliora DeFi app | Plain `viem` code and Hyperliquid API calls. The snippets below follow it.                                                           |
+| Testnet funding builders           | A private SDK package | `buildFundingWithdrawal` and `buildReturnDeposit`. Testnet only. See the end of this page.                                           |
+
+Code on this page type-checks against the SDK, except where it uses the HyperEVM options noted in the text. It is illustrative. Fill in the values in square brackets from [Network reference](/defi/reference/network-reference).
+
+## The flow
+
+| Step        | Who signs         | What happens                                                                     | Palliora or Hyperliquid |
+| ----------- | ----------------- | -------------------------------------------------------------------------------- | ----------------------- |
+| 1. Derive   | Nobody            | Compute the Sub-account key from the spending key and an index.                  | Palliora                |
+| 2. Fund     | Your shielded key | A relayed adaptor call sends USDC to the Sub-account's Hyperliquid perp account. | Palliora                |
+| 3. Confirm  | Nobody            | Wait until the credit shows in the Sub-account's Hyperliquid ledger.             | Hyperliquid             |
+| 4. Trade    | The Sub-account   | Set isolated leverage, then place and close orders.                              | Hyperliquid             |
+| 5. Move out | The Sub-account   | Move the money from perp to spot, then from Hyperliquid to HyperEVM.             | Hyperliquid             |
+| 6. Buy gas  | The Sub-account   | Pay a flat USDC fee for a small amount of HYPE.                                  | Palliora                |
+| 7. Return   | The Sub-account   | Deposit to your main shielded address.                                           | Palliora                |
+
+## 1. Derive a Sub-account
+
+The key comes from your shielded signing key. You can recover every Sub-account from your wallet, so losing the browser loses nothing.
+
+```ts
+import { concat, keccak256, numberToHex, toBytes, toHex } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+
+// The context strings keep their original names. They are part of the
+// derivation, so changing them changes every address.
+const CONTEXT = {
+  testnet: 'veilnyx/hl-burner/v1/',
+  mainnet: 'veilnyx/hl-burner/m1/',
+} as const;
+
+export function deriveSubAccount(
+  spendingKey: bigint,
+  index: number,
+  network: 'testnet' | 'mainnet',
+) {
+  const key = keccak256(
+    concat([
+      toBytes(numberToHex(spendingKey, { size: 32 })),
+      toBytes(toHex(`${CONTEXT[network]}${index}`, { size: 32 })),
+    ]),
+  );
+  const sub = privateKeyToAccount(key);
+  return { index, address: sub.address, privateKey: key };
+}
+
+const spendingKey = account.signer.privateKey; // from the user's ShieldedAccount
+if (spendingKey === undefined) throw new Error('this signer does not expose its key');
+const sub = deriveSubAccount(spendingKey, 0, 'mainnet');
+```
+
+The mainnet and testnet contexts differ on purpose, so one wallet never has the same Sub-account address on both. In the app, the same derivation is called `deriveBurner`.
+
+Use a new index for every position. The app scans 24 indices when it looks for Sub-accounts it has used.
+
+Anyone who has your spending key can derive all your Sub-accounts, in the past and the future. Guard it as you guard the shielded account.
+
+## 2. Fund it
+
+Funding is one adaptor call from the shielded balance. The adaptor calls Circle's USDC deposit contract with the Sub-account as the recipient, in the same transaction. USDC is the only supported token, and the adaptor enforces a minimum amount. See [Status and limits](/defi/reference/status-and-limits).
+
+```ts
+import { encodeAbiParameters, parseAbiParameters, Hex } from 'viem';
+import { TransactionType } from '@palliora.org/defi-shared-types';
+
+const FUNDING_ADAPTOR = '[HYPEREVM_FUNDING_ADAPTOR_ADDRESS]' as Hex;
+const USDC_ASSET_ID = 65538;
+
+// `core` is built for HyperEVM, as in the quickstart. The `relayed`, `paymaster`
+// and `relayFee` options need [SDK_VERSION_WITH_HYPEREVM].
+const fundTx = await core.createTransaction(
+  {
+    type: TransactionType.CALL_ADAPTER,
+    assetIds: [USDC_ASSET_ID],
+    values: [25_000_000n], // 25 USDC
+    feeAssetId: USDC_ASSET_ID,
+    to: FUNDING_ADAPTOR,
+    payload: encodeAbiParameters(parseAbiParameters('address subAccount'), [sub.address]),
+  },
+  {
+    revokerId: 0,
+    relayed: true,
+    paymaster: relayerAddress, // from GET /quote
+    relayFee: relayFee, // at least the quote
+  },
+);
+```
+
+Then sign and prove as usual and send the calldata to the relayer's `/fund` endpoint. See [Relayer API](/defi/build/relayer-api). The Sub-account is credited the full amount. The relayer fee is on top, taken from your notes.
+
+Wait for the relayer's job to confirm. Do not retry blindly. A second call pays again. The app records each attempt before it pays, and a retry for the same Sub-account waits for the first one to land.
+
+## 3. Confirm the credit
+
+The deposit lands on Hyperliquid, not on HyperEVM. Check the Sub-account's ledger with Hyperliquid's info API, request type `userNonFundingLedgerUpdates`. Look for a `send` from the USDC deposit contract to the Sub-account for exactly the amount you funded. That match is exact, and it holds while positions move the balance.
+
+If the credit does not appear after a few minutes, it may still land. Do not fund the same Sub-account again until you have checked.
+
+## 4. Trade
+
+The Sub-account signs its own Hyperliquid actions. No Palliora contract and no Palliora server is involved. Use Hyperliquid's API documentation for the signing rules, order formats and number formatting. The rules that matter for this flow:
+
+* **Isolated margin.** Call `updateLeverage` with `isCross: false` before the first order. The account is new, so you cannot assume a margin mode.
+* **One position per Sub-account.** Reuse links positions to each other and, in the end, to a return deposit. The app refuses to open a position on a Sub-account that has already traded.
+* **Trading is gasless.** Hyperliquid actions need no HYPE.
+
+Size, direction, entry price, leverage and liquidation price are public on Hyperliquid and stay tied to the Sub-account's address.
+
+## 5. Move the money out
+
+When the position is closed:
+
+1. Move free USDC from perp to spot with the `usdClassTransfer` action, with `toPerp: false`.
+2. Send the spot USDC to the token's system address with the `sendAsset` action. For USDC (token index 0) that address is `0x2000000000000000000000000000000000000000`. HyperCore moves it to the Sub-account's HyperEVM address.
+3. Wait until the USDC shows in the Sub-account's HyperEVM balance.
+
+HyperCore charges about 1 USDC on an account's first transfer out, and takes it from the USDC balance. A new Sub-account needs enough to cover that charge, the gas fee and the pool's minimum deposit, or it cannot return the money. The app recommends a funding size that covers all three and does not block a smaller one.
+
+## 6. Buy return gas
+
+The Sub-account holds USDC on HyperEVM but no HYPE, and the return needs gas. Buying the gas from the user's main wallet would link the two for good, so the GasStation sells a small amount of HYPE for a flat USDC fee. The Sub-account signs an EIP-3009 `ReceiveWithAuthorization` for the fee, and the relayer submits it. The Sub-account does not need gas to sign.
+
+```ts
+import { keccak256, parseAbi, toHex, Hex } from 'viem';
+
+const stationAbi = parseAbi([
+  'function feeUsdc() view returns (uint256)',
+  'function nonceFor(bytes32 salt) view returns (bytes32)',
+]);
+
+const feeUsdc = await publicClient.readContract({
+  address: GAS_STATION,
+  abi: stationAbi,
+  functionName: 'feeUsdc',
+});
+const salt = keccak256(toHex(`gas:${sub.address}:${Date.now()}`));
+const nonce = await publicClient.readContract({
+  address: GAS_STATION,
+  abi: stationAbi,
+  functionName: 'nonceFor',
+  args: [salt],
+});
+const validBefore = Math.floor(Date.now() / 1000) + 3600;
+
+// The Sub-account signs. It needs no HYPE to do this.
+const signature = await sub.signTypedData({
+  domain: {
+    name: 'USDC',
+    version: '2',
+    chainId: HYPEREVM_CHAIN_ID,
+    verifyingContract: USDC,
+  },
+  types: {
+    ReceiveWithAuthorization: [
+      { name: 'from', type: 'address' },
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'validAfter', type: 'uint256' },
+      { name: 'validBefore', type: 'uint256' },
+      { name: 'nonce', type: 'bytes32' },
+    ],
+  },
+  primaryType: 'ReceiveWithAuthorization',
+  message: {
+    from: sub.address,
+    to: GAS_STATION,
+    value: feeUsdc,
+    validAfter: 0n,
+    validBefore: BigInt(validBefore),
+    nonce,
+  },
+});
+
+const res = await fetch(`${RELAYER_URL}/gas`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    burner: sub.address, // the API field keeps its original name
+    validAfter: 0,
+    validBefore,
+    salt,
+    signature,
+  }),
+});
+const { id } = await res.json(); // poll GET /status/<id> until it is confirmed
+```
+
+Read the station address and the price from the network, not from the relayer. The relayer can only submit what you signed. The signature binds the fee and the station, and the station sends the HYPE in the same transaction that takes the fee, so you pay nothing unless you receive the gas. Only buy gas when the Sub-account's HYPE balance is below what an approve and a deposit need.
+
+## 7. Return to your shielded balance
+
+The Sub-account deposits its USDC to your main shielded address. Build the deposit with the user's `Core`, because that makes the new note the user's. Have the Sub-account submit it, because a deposit pulls tokens from the sender.
+
+```ts
+import { createWalletClient, http, erc20Abi } from 'viem';
+import { TransactionType } from '@palliora.org/defi-shared-types';
+
+const subWallet = createWalletClient({ account: sub, transport: http(HYPEREVM_RPC) });
+const value = 20_000_000n; // the USDC now on the Sub-account, in base units
+
+// `core` belongs to the USER's shielded account.
+const returnTx = await core.createTransaction(
+  {
+    type: TransactionType.DEPOSIT,
+    assetIds: [USDC_ASSET_ID],
+    values: [value],
+    feeAssetId: 0,
+    to: account.shieldedAddress.pack(), // the user's main shielded address
+  },
+  { revokerId: 0, viaBundler: false },
+);
+const returnZtx = await core.proveTransaction(await core.signTransaction(returnTx));
+
+// The Sub-account submits and pays its own gas.
+await subWallet.writeContract({
+  chain: null,
+  address: USDC,
+  abi: erc20Abi,
+  functionName: 'approve',
+  args: [POOL, value],
+});
+await subWallet.writeContract({
+  chain: null,
+  address: POOL,
+  abi: poolAbi, // from the protocol artifacts
+  functionName: 'transact',
+  args: [returnZtx.toSolidityInput()],
+});
+```
+
+Do not register the Sub-account as a shielded account. A registration writes a public link from the Sub-account's address to a shielded address, which is the link this flow exists to hide. The deposit proof does not bind the sender, so the Sub-account can submit a proof whose notes belong to the user. The proof shows that the recipient is a registered address, without showing which one.
+
+The pool's minimum deposit applies to the return. See [Status and limits](/defi/reference/status-and-limits).
+
+## Rules for builders
+
+| Rule                                                                                                        | Why                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Never pay for a Sub-account's gas from the user's wallet                                                    | It links the Sub-account to the user for good. Use the GasStation.                                                                                             |
+| Never reuse a Sub-account for a second position                                                             | Reuse links positions to each other and to the return.                                                                                                         |
+| Never send an index, a label or an address of a Sub-account to your own servers, analytics or error reports | A label next to a public position is enough to identify the user.                                                                                              |
+| Send the relayer calldata and nothing else                                                                  | The relayer needs only the proven transaction.                                                                                                                 |
+| Do not retry a funding blindly                                                                              | A retry pays twice. Check the Hyperliquid ledger first.                                                                                                        |
+| Leave timing to the user                                                                                    | The relayer submits at once and adds no delay. A user close to a liquidation cannot wait, and a delay would not hide the request time from the relayer anyway. |
+
+The Sub-account's own address is public once it acts, and the funding call carries it as the adaptor payload. The rule is about everything else.
+
+## Testnet differences
+
+The testnet flow does not use the funding adaptor. The relayer funds the Sub-account. The user withdraws USDC and HYPE together from the pool in a single transaction, with the relayer as paymaster, and the relayer forwards the money to the Sub-account on Hyperliquid. The private testnet SDK has two builders for it:
+
+| Builder                  | What it returns                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `buildFundingWithdrawal` | A request and options for one `WITHDRAW` that carries margin and gas together. It throws `MissingGasError` if the gas is missing, because gas funded separately from the user's wallet deanonymises the user. |
+| `buildReturnDeposit`     | A request and options for the return `DEPOSIT`, to be submitted by the Sub-account.                                                                                                                           |
+
+The testnet derivation context is `veilnyx/hl-burner/v1/`. The mainnet context is `veilnyx/hl-burner/m1/`.
+
+## Next
+
+* [Relayer API](/defi/build/relayer-api)
+* [Troubleshooting](/defi/build/troubleshooting)
+* [Privacy model](/defi/learn/concepts/privacy-model)

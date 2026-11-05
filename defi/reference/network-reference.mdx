@@ -1,0 +1,197 @@
+---
+title: "Network reference"
+---
+
+Contract addresses, assets, adaptors, verifiers and endpoints for every Palliora DeFi network. This page is the one place addresses live. Other pages link here.
+
+Values were read from the networks on **2026-10-16** unless a row says otherwise. Protocol v1. The Ethereum pool is contract revision 2 and the HyperEVM pool is revision 1. See [Status and limits](/defi/reference/status-and-limits) for what that number means.
+
+## Which pool to use
+
+| Network          | Chain id | Pool (proxy)                                 | Status                           |
+| ---------------- | -------- | -------------------------------------------- | -------------------------------- |
+| Ethereum mainnet | 1        | `0x4cEcb7F987d220fe2E8608149fa76ed6d021Ad11` | Live                             |
+| HyperEVM mainnet | 999      | `0x25913fa4a703aFF4b15b7bF00F9723dDE0446917` | Live                             |
+| Sepolia          | 11155111 | `0xd97B594806450b2E661447A5C0444c02519aD4bf` | Test network                     |
+| HyperEVM testnet | 998      | `0x775f14F0c514F757950053463904Db0793Fd6A3e` | Test only. Proofs are forgeable. |
+
+Always send transactions to the pool proxy, never to the implementation.
+
+## Ethereum mainnet
+
+### Core contracts
+
+| Contract             | Address                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| Pool (proxy)         | `0x4cEcb7F987d220fe2E8608149fa76ed6d021Ad11`                            |
+| Pool implementation  | `0x8f88fB9c8EB3A2165306B9bc82205744C28Dd980`                            |
+| Verifier router      | `0xcf9F64c6b60beB11695fd33A5F69a7F5239eE464`                            |
+| Hasher               | `0x6e2Bf9232d58B5E889CdCEf8F0cd7DCAe8a9c621`                            |
+| AdaptorHandler       | `0x0ee8CAAd308db19056C708295f540E4f35808d1d`                            |
+| Gateway              | `0x2fF6F018016d23a355FFAe68A0C29590A39E1fB5`                            |
+| Paymaster            | `0xFc3339056878424a7D82CEB2436972d4C6Aa4168`                            |
+| Sanctions screener   | `0x40C57923924B5c5c5455c48D93317139ADDaC8fb`                            |
+| Native token wrapper | WETH `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2`                       |
+| EntryPoint           | v0.7 `0x0000000071727De22E5E9d8BAf0edAc6f37da032`                       |
+| Owner                | `0xa285717BfD608468566bfBda742b56b1177494f7`, a hardware-wallet account |
+| Pauser               | `0x50887b9a36E734cF861FE236fA6b4bE68D205113`                            |
+
+The pool was deployed in block 25,647,575 on 2026-07-30. The current implementation has been live since 2026-10-06. The paymaster is the one named in each transaction's fee data. The proof binds that address, so a client must use the current one. The two earlier paymasters are retired.
+
+### Assets
+
+Seven assets are registered, and all are active. The asset id is what you put in a transaction. Ids are specific to a pool.
+
+| Id    | Token                                             | Address                                      | Decimals | USD price feed                               |
+| ----- | ------------------------------------------------- | -------------------------------------------- | -------- | -------------------------------------------- |
+| 65537 | WETH                                              | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` | 18       | `0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419` |
+| 65538 | USDC                                              | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | 6        | `0x84E045745ED829c5b778aBB17104FC2600020850` |
+| 65539 | Static aWETH                                      | `0x252231882FB38481497f3C767469106297c8d93b` | 18       | `0x5424384B256154046E9667dDFaaa5e550145215e` |
+| 65540 | Static aUSDC                                      | `0x73edDFa87C71ADdC275c2b9890f5c3a8480bC9E6` | 6        | `0x84E045745ED829c5b778aBB17104FC2600020850` |
+| 65541 | wstETH                                            | `0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0` | 18       | None                                         |
+| 65542 | gtWETH, a Gauntlet WETH Prime vault share         | `0x2371e134e3455e0593363cBF89d3b6cf53740618` | 18       | None                                         |
+| 65543 | steakUSDC, a Steakhouse Prime Instant vault share | `0xbeef088055857739C12CD3765F20b7679Def0f51` | 18       | None                                         |
+
+The three assets with no price feed (wstETH, gtWETH and steakUSDC) are adaptor outputs. They enter the pool only through an adaptor, and a direct deposit of an asset with no feed is not accepted. wstETH comes from the Lido adaptor. gtWETH and steakUSDC come from the Morpho adaptor.
+
+### Adaptors
+
+All four are registered with the pool. A registered adaptor is the address you pass as `to` in an adaptor call.
+
+| Adaptor | Address                                      | Use                        |
+| ------- | -------------------------------------------- | -------------------------- |
+| Uniswap | `0x57B9D7602497d8a78eE06B1Eba6cB37E8E3E0738` | Swap                       |
+| Aave    | `0x2783E83F7EB8780741CAb5448b6D50A3040E46C0` | Lend                       |
+| Lido    | `0x05a0555371FEc178Cf4d619AD12d57aCb56d8C33` | Stake                      |
+| Morpho  | `0x97bD9C144E5082a435499F8ee108B40Da38b38C1` | Deposit into Morpho vaults |
+
+The protocol also contains adaptors for Curve, Ethena, 1inch, Rocket Pool and Beefy. They are not deployed on Ethereum mainnet and are not live.
+
+### Verifiers
+
+The verifier router maps each circuit to its verifier. The proving keys behind them come from the [ZK ceremony](/defi/reference/zk-ceremony).
+
+| Circuit              | Verifier                                     |
+| -------------------- | -------------------------------------------- |
+| Register             | `0x856C8adE272A937456b3BDdefb816D615136356C` |
+| Tree update          | `0x372877CCa63D5D0c23C1816FB675c464695a25cA` |
+| Transact 2 in, 1 out | `0xfC2855796845753a5eFD6441c87Cb3ec127BC715` |
+| Transact 2 in, 2 out | `0xA4f9A7B53228892ae35Db2DAe97c3AfC2EC8d5c1` |
+| Transact 2 in, 3 out | `0xdb12243562837D770Ee8F0C5Ee5CA0a448025169` |
+| Transact 4 in, 2 out | `0xCe95305392e96e054F8497dd8f52DAf58aeedC2A` |
+| Transact 4 in, 4 out | `0x7b72B77F0D8A774B253415f21B180FaDE7278C00` |
+| Transact 8 in, 2 out | `0x81B402E56Fa66dc9F62846ab2d519539bCdd16Ed` |
+| Transact 8 in, 4 out | `0x2a4613740A64347b8B6e0D2cDC0d9793e2E3A362` |
+
+## HyperEVM mainnet
+
+### Core contracts
+
+| Contract             | Address                                                                       |
+| -------------------- | ----------------------------------------------------------------------------- |
+| Pool (proxy)         | `0x25913fa4a703aFF4b15b7bF00F9723dDE0446917`                                  |
+| Pool implementation  | `0x8D7304FAC928E312F06535b93aBAA18afA44bE4C`                                  |
+| Verifier router      | `0x17b46E30Bc7CDc63aAb9f7aB945a611bdd6c865c`                                  |
+| Hasher               | `0xA9d61c4A66705314157D3DEb726463162f2D95b5`                                  |
+| AdaptorHandler       | `0xfb49e16373D04BD0F000092C79c88bb42065DFd1`                                  |
+| Sanctions screener   | None set (the zero address)                                                   |
+| Native token wrapper | WHYPE `0x5555555555555555555555555555555555555555`                            |
+| Owner                | `0xa285717BfD608468566bfBda742b56b1177494f7`, the same account as on Ethereum |
+| Pauser               | `0x50887b9a36E734cF861FE236fA6b4bE68D205113`, the same as on Ethereum         |
+
+The pool was deployed in block 47,282,989 on 2026-09-30, from the same code as the Ethereum implementation. HyperEVM has no ERC-4337 bundler, so a relayer submits transactions. A Gateway (`0x6e1dAA932ed0e15cD4590e53F64554c576bcbcC4`) and a Paymaster (`0x44e76C26fc9B988Ce9731d1795b1bbFA85ECa4c5`) contract exist on HyperEVM, and the relayer path does not use them.
+
+### Assets
+
+Two assets are registered, and both are active.
+
+| Id    | Token         | Address                                      | Decimals | USD price feed                                                   |
+| ----- | ------------- | -------------------------------------------- | -------- | ---------------------------------------------------------------- |
+| 65537 | WHYPE         | `0x5555555555555555555555555555555555555555` | 18       | `0xa8a94Da411425634e3Ed6C331a32ab4fd774aa43` (RedStone HYPE/USD) |
+| 65538 | USDC (Circle) | `0xb88339CB7199b77E23DB6E890353E22632Ba630f` | 6        | `0x4C89968338b75551243C99B452c84a01888282fD` (RedStone USDC/USD) |
+
+The address `0x6B9E773128f453f5c2C60935Ee2DE2CBc5390A24` is Circle's USDC deposit contract, not a token. It is where the funding adaptor sends USDC. Do not use it as an asset address.
+
+### Private Sub-account contracts
+
+| Contract or service                         | Address or URL                               |
+| ------------------------------------------- | -------------------------------------------- |
+| Funding adaptor (`HyperCoreFundingAdaptor`) | `0x1b276a6353e8bF0cE27111bff03e7496918a3F0b` |
+| GasStation                                  | `0x72D24F0e4BBEea85c98e570d2A02a06775AEF36A` |
+| Relayer account                             | `0x424d6D4457B92195449050129dc5379d740B69ab` |
+| Relayer URL                                 | `https://defi.palliora.org/relayer-mainnet`  |
+
+The funding adaptor is registered with the pool. It takes USDC only. It refuses amounts below 1 USDC, and that minimum is fixed in the contract. The GasStation sells 0.0005 HYPE for 0.05 USDC. Its owner is the same account as the pool's. The relayer account is the address a relayed transaction must name as its paymaster. The same relayer also answers at `https://trade.veilnyx.com/relayer-mainnet` for now. Read the live relayer account from `GET /quote`. See [Relayer API](/defi/build/relayer-api).
+
+An earlier funding adaptor with a 5 USDC minimum (`0xD53877E00868A7924975f4d3BA8E596a3038D6a5`) is retired.
+
+### Verifiers
+
+HyperEVM reuses the proving keys from the Ethereum ceremony. All nine verifier contracts have the same bytecode as Ethereum's. The code hashes were compared on 2026-10-16.
+
+| Circuit              | Verifier                                     |
+| -------------------- | -------------------------------------------- |
+| Register             | `0x82C8CD776707eeeD95a4b248d73B63dabAE2d10b` |
+| Tree update          | `0x70Bd8f99f328d1967D5075402d73588A20c08CB9` |
+| Transact 2 in, 1 out | `0x9c75948e2E0F63c003A96c0202b02AEBD95fa152` |
+| Transact 2 in, 2 out | `0x6dc08A79E37490f050fD481Bf1e3237835354b06` |
+| Transact 2 in, 3 out | `0xa9fD688c51D4279a087ba2ae3Ec4739c44Ee8BF4` |
+| Transact 4 in, 2 out | `0x6C0972faA323Ed2cBCaEac6345D3625c39dBA1Bb` |
+| Transact 4 in, 4 out | `0xd08eaFFbfC9Bdbf54Ed65dfe0091c205082D8538` |
+| Transact 8 in, 2 out | `0xab0c362d4fB0f10B32E1e6D3cF2B91076c90ba53` |
+| Transact 8 in, 4 out | `0xa88771E6e7104d5423ACFFF246c1b08ac13d69A9` |
+
+## Disclosure network
+
+One revoker serves both mainnet pools. Revoker id 0 is registered and active on Ethereum and on HyperEVM. Decom guardians hold the shares of the disclosure key. The revoker keeps a report of what it de-anonymized on Palliora DA. Only the revoker, or any third party the revoker grants access to, can read it. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure) and [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+| Item                              | Value                                        |
+| --------------------------------- | -------------------------------------------- |
+| Request manager (Ethereum, proxy) | `0xD809C5DC5eC43E1aE358785b651d427b3d6D9255` |
+| Request manager implementation    | `0x89e76e48F9bf077f0df93f9DAA695c68baDDe587` |
+| Guardian group                    | 7 of 10 guardians                            |
+
+The request manager was deployed in block 25,648,509 on 2026-07-30. The pool stores each revoker's keys. Revoker id 0 has these:
+
+| Key                                     | Coordinate | Decimal                                                                       | Hex                                                                  |
+| --------------------------------------- | ---------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Disclosure key (`encryptionPublicKey`)  | x          | 8415733266590874906051569398859887253801673499116319370506942542327247131378  | `0x129b22dff32876b753bec97b17e10dd86cd49c36674d16fe5e7f727ed73dd2f2` |
+| Disclosure key (`encryptionPublicKey`)  | y          | 4303763666990812745724909494561603880133773663501392405214554054831058921986  | `0x0983d80aa5a69fdf66d6cc10399d56b2eca39ff43a7513f364ef836460132a02` |
+| Revoker public key (`revokerPublicKey`) | x          | 19670944452806042525069794818829249411975318219685565589987272359777840230253 | `0x2b7d5c298ab29be244f40c855c58a9d9e195a89c2a27e8c2dbfa6f5bd2f16f6d` |
+| Revoker public key (`revokerPublicKey`) | y          | 5705876210490413354479267746861793442476799294826521514340924438581325830039  | `0x0c9d695759a183cb758bfa94c324f0e5cb4d37b25bdc7a1e53b383fdefa79797` |
+
+The disclosure key is the guardians' shared key plus the revoker public key. Each coordinate is given unpacked, so you can compare it with what the SDK uses.
+
+## Test networks
+
+| Network          | Contract                | Address                                      |
+| ---------------- | ----------------------- | -------------------------------------------- |
+| Sepolia          | Pool (proxy)            | `0xd97B594806450b2E661447A5C0444c02519aD4bf` |
+| Sepolia          | Request manager (proxy) | `0xa3BD03CB81c99469b68978c10971D79a46EA2383` |
+| HyperEVM testnet | Pool (proxy)            | `0x775f14F0c514F757950053463904Db0793Fd6A3e` |
+
+On Sepolia, the pool is unpaused and reports revision 1, read on 2026-10-16. Use this pool and request manager and no others.
+
+The HyperEVM testnet pool is from the deployment record of 2026-08-24. It is not re-read here. It runs a mock sanctions screener and a mock price feed. Its verifier keys were generated locally by one contributor, so the secret behind them is known, and anyone can forge a proof on that network. Use it only to test, and never mix its proving keys with mainnet's.
+
+## How these values were read
+
+Each value came from a read-only call to the network, so you can repeat it. This example reads the Ethereum pool's limits with [Foundry](https://getfoundry.sh):
+
+```bash
+POOL=0x4cEcb7F987d220fe2E8608149fa76ed6d021Ad11
+RPC=https://ethereum.publicnode.com
+
+cast call $POOL "paused()(bool)" --rpc-url $RPC
+cast call $POOL "minDepositUsd()(uint256)" --rpc-url $RPC
+cast call $POOL "getAsset(uint24)((uint24,uint8,address,bool,uint8,address,uint8))" 65538 --rpc-url $RPC
+cast call $POOL "isAdaptorSupported(address)(bool)" 0x57B9D7602497d8a78eE06B1Eba6cB37E8E3E0738 --rpc-url $RPC
+```
+
+Dollar amounts on the pool use 6 decimals, so `10000000` means $10. If a value here differs from the network, the network is right.
+
+## Next
+
+* [Status and limits](/defi/reference/status-and-limits)
+* [Fees](/defi/reference/fees)
+* [Quickstart](/defi/build/quickstart)

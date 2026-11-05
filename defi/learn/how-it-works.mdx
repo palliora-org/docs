@@ -1,0 +1,52 @@
+---
+title: "How Palliora DeFi works"
+---
+
+This page follows one private transaction from start to finish, then shows how it is de-anonymized when that is needed and how the result is kept on Palliora. It names each part, says what the public can see at each step, and links to the page that goes deeper.
+
+<Frame>
+  <img className="block dark:hidden" src="/images/how-palliora-defi-works-light.svg" alt="Nine steps across seven lanes in three territories. Your device builds and proves a private transaction. In the EVM network, a relayer or bundler submits it and the pool contract checks and records it. Later, only if the transaction must be de-anonymized, the revoker makes a public request in the request record. In the Palliora DeFi guardians and revoker network, each Decom guardian checks the request and sends a partial decryption directly, and a failed check rejects the request. The revoker combines a threshold of partials with its own key and reads the decrypted transaction, then seals a report to the reader's key, its own by default, and publishes it. In Palliora Core, Data Availability keeps the encrypted report. Later, the revoker, or a third party the revoker grants access to, reads it with an access grant. The public sees nullifiers, new commitments, encrypted memos, the fee and the submitter. Sender, recipient, token and amount stay hidden." />
+  <img className="hidden dark:block" src="/images/how-palliora-defi-works-dark.svg" alt="Nine steps across seven lanes in three territories. Your device builds and proves a private transaction. In the EVM network, a relayer or bundler submits it and the pool contract checks and records it. Later, only if the transaction must be de-anonymized, the revoker makes a public request in the request record. In the Palliora DeFi guardians and revoker network, each Decom guardian checks the request and sends a partial decryption directly, and a failed check rejects the request. The revoker combines a threshold of partials with its own key and reads the decrypted transaction, then seals a report to the reader's key, its own by default, and publishes it. In Palliora Core, Data Availability keeps the encrypted report. Later, the revoker, or a third party the revoker grants access to, reads it with an access grant. The public sees nullifiers, new commitments, encrypted memos, the fee and the submitter. Sender, recipient, token and amount stay hidden." />
+</Frame>
+
+## The parts
+
+| Part                           | What it does                                                                                                                                                                                    | Where it runs                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Shielded account               | Holds your keys. Builds and proves your transactions.                                                                                                                                           | Your browser or app                    |
+| Pool                           | Holds the tokens. Keeps the tree of notes and the list of spent notes. Checks every proof.                                                                                                      | A contract on Ethereum and on HyperEVM |
+| Verifiers                      | Check zero-knowledge proofs. There is one per transaction shape.                                                                                                                                | Contracts                              |
+| Relayer, bundler and paymaster | Submit your transaction and pay gas.                                                                                                                                                            | Services, plus a paymaster contract    |
+| Adaptors                       | Let a private transaction call another protocol.                                                                                                                                                | Contracts                              |
+| Screener                       | Blocks sanctioned addresses at deposit and registration.                                                                                                                                        | A contract on Ethereum                 |
+| Disclosure network             | A revoker and Decom guardians who can de-anonymize one transaction together.                                                                                                                    | Services, with a public request record |
+| Palliora Core                  | Keeps what a revoker de-anonymized as an encrypted report, with silent threshold encryption and Guardians. A Compute Contract coordinates storing and retrieving it, for the authorized actors. | Palliora's privacy engine              |
+
+A Decom guardian is a node that holds a share of the disclosure key. It is not a Palliora Guardian. Palliora Guardians have a different job: they protect the stored report. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure) and [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## Life of a private transaction
+
+1. **Create and register your account.** Your wallet signs a fixed message. The app turns the signature into your keys. You then register, which links your public address to your shielded address so others can send to you. See [Shielded accounts](/defi/learn/concepts/shielded-accounts).
+2. **Deposit.** Tokens move from your wallet into the pool. A proof creates notes worth that amount. You pay gas for this step from your wallet, so it is public.
+3. **Settle.** New notes join the commitment tree after the next tree update. A tree update is a proof that anyone can submit, and the app does it for you. Until then the balance shows as pending. See [Notes and commitments](/defi/learn/concepts/notes-and-commitments).
+4. **Send, swap or withdraw.** You spend notes. The proof shows the notes exist, you own them, the value adds up, and the new notes are correct. The transaction reveals a nullifier for each spent note and a commitment for each new one, and nothing else about them. A relayer submits it. See [Shielded transactions](/defi/learn/concepts/shielded-transactions) and [Relaying and gas](/defi/learn/concepts/relaying-and-gas).
+5. **Call another protocol, if you want.** For a swap, a loan or a stake, the pool sends the tokens to an adaptor, the adaptor calls the other protocol, and the result comes back to you as new notes. See [Adaptors](/defi/learn/concepts/adaptors).
+6. **Disclose, only when needed.** Every transaction includes an encrypted seed. A revoker and a threshold of Decom guardians can de-anonymize it together. No one of them can do it alone. The revoker then keeps what it de-anonymized on Palliora, as an encrypted report. The revoker, or any third party the revoker grants access to, can open it. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## What the public sees
+
+| Action       | Public                                                                     | Hidden                                               |
+| ------------ | -------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Register     | Your public address and your shielded address, linked                      | Nothing else. Your keys never leave your device.     |
+| Deposit      | Your wallet, the token and the amount                                      | Which notes you now own                              |
+| Send         | Nullifiers, new commitments, encrypted memos, and the fee token and amount | Sender, recipient, token and amount                  |
+| Withdraw     | The receiving address, the token and the amount                            | Which notes you spent, and the link to your deposits |
+| Adaptor call | The adaptor, the tokens in and out, and its payload                        | Who made the call                                    |
+
+Privacy is as strong as the number of other people using the pool. Read the [Privacy model](/defi/learn/concepts/privacy-model) for what this means in practice.
+
+## Where to go next
+
+* [Concepts](/defi/learn/concepts) for each part in detail.
+* [Quickstart](/defi/build/quickstart) to send a private transaction yourself.
+* [Network reference](/defi/reference/network-reference) for contract addresses.

@@ -1,0 +1,22 @@
+---
+title: "Tool calls and agent runs"
+---
+
+An agent rarely answers from one model call alone. It searches the web, fetches a page, runs a calculation, calls another API, then folds the result back into the conversation before answering. In Palliora AI, each of those steps, the model call and every tool call, runs as its own [Compute Contract](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/compute-contracts.md). An agent run is a sequence of them, not a single opaque request.
+
+## How a run is built
+
+1. The model receives the conversation so far and decides it needs a tool: a web search, for example.
+2. That tool call runs as a Compute Contract of its own: what tool, what input, what came back.
+3. The tool's result goes back into the conversation, and the model is called again, same pattern as the first call.
+4. This repeats until the model has what it needs to answer, then produces the final response.
+
+Nothing about this needs a separate "agent" primitive. It's the same [Compute Contract](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/compute-contracts.md) mechanism used once per step, coordinated by whatever is driving the conversation, your own service if you built one with [Build a chat-completions-compatible service](/ai/build/chat-completions-service), or the Palliora AI demo app itself.
+
+## Why this matters
+
+Because every step is its own contract, a multi-step run isn't a black box. Each tool call and each model call is independently recorded, with its own inputs, outputs and Guardian group. Chaining those records together is what produces a [provenance](/ai/learn/concepts/provenance) record for the whole run: which models ran, which tools were called, and in what order.
+
+## What stays private
+
+Privacy is chosen per contract, the same way it is for a single model call. A tool call can run plaintext or threshold-encrypted, see [Encrypted compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/build/guides/encrypted-compute.md), and under a TEE if the tool itself handles sensitive data, see [Confidential compute](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/learn/concepts/confidential-compute.md). Nothing about running multiple steps changes what privacy options are available for any one of them.

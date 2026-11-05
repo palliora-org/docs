@@ -1,0 +1,52 @@
+---
+title: "Store Data"
+---
+
+Submit a plain, unencrypted payload to Palliora's Data Availability layer. This is the simplest DA write there is, no Guardian group, no encryption, no Compute Contract. It's what a Publisher does before anyone can build an agreement on top of what they published, see [Data Availability](/learn/concepts/data-availability) for what happens to the data once it's submitted.
+
+```ts
+// store-data.mjs
+import { init, getKeyring, submitData } from "@palliora.org/chainsdk";
+
+async function main() {
+  init({
+    pallioraWs: process.env.PALLIORA_WS ?? "wss://staging.manas-rpc.palliora.org",
+  });
+
+  const keyring = await getKeyring();
+  const account = keyring.addFromUri("//Bob"); // dev-only, replace for real use
+
+  await submitData(account, "hello from palliora-docs");
+  console.log("Submitted. Check your terminal's debug output (init with debug: true) for the transaction hash.");
+}
+
+main().catch((err) => {
+  console.error("Failed:", err.message);
+  process.exit(1);
+});
+```
+
+## A current limitation worth knowing
+
+`submitData` doesn't return a locator for what you just submitted, no block number, no reference ID. If you need to find your data again afterward, track the submission yourself: pass `init({ debug: true })` to log the transaction hash, or build the transaction with `signAndSend` directly instead of going through `submitData`, which does return `{ blockNumber, index, hash }`:
+
+```ts
+import { getApi, signAndSend } from "@palliora.org/chainsdk";
+
+const api = await getApi();
+const tx = api.tx.dataAvailability.submitData("hello from palliora-docs");
+const receipt = await signAndSend(tx, account);
+console.log("Landed at block", receipt.blockNumber, "index", receipt.index);
+```
+
+Once you have a block height, the SDK's indexer client can fetch the blob back:
+
+```ts
+import { getBlob } from "@palliora.org/chainsdk";
+// indexerClient: see SDK Reference for how it's configured
+const blob = await getBlob(indexerClient, receipt.blockNumber);
+```
+
+## For data that needs to stay private
+
+This guide submits plaintext. If the data itself needs to be hidden, not just coordinated through the network, you need a Guardian group and threshold-encrypted submission (`submitTEDataWithCipher` plus `registerDataAgreement`), which is the same cryptographic groundwork covered in [Encrypted Compute](/build/guides/encrypted-compute).

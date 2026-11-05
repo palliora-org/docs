@@ -1,0 +1,68 @@
+---
+title: "Shielded accounts"
+---
+
+A shielded account is your private account in the pool. It sits next to your normal wallet, and your wallet is all you need to get it back. There is no extra seed phrase to keep.
+
+## Keys
+
+A shielded account has two key pairs and a root address.
+
+| Item          | What it is                                                                                         | Who can see it                                                              |
+| ------------- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Sign key pair | Authorizes spending. The private key signs your transactions.                                      | Keep the private key secret. Anyone who holds it can spend your notes.      |
+| View key pair | Lets you read your balance and history. The private key decrypts the memo attached to each note.   | Share the private key only with someone you trust to see all your activity. |
+| Root address  | A hash of your sign public key and your view private key. It is the identity your notes belong to. | Public once you register.                                                   |
+
+The keys are derived in two steps:
+
+```
+seed        = keccak256(wallet signature) reduced to the proof field
+sign key    = Poseidon(seed, "sign" salt), 248 bits
+view key    = Poseidon(seed, "view" salt), 248 bits
+root address = Poseidon(sign public key x, sign public key y, view private key)
+```
+
+The wallet signature is over a fixed message, so signing it again with the same wallet gives the same keys. Nothing is stored. If you lose the wallet, you lose the account. If you still have the wallet, sign the same message again to recover it.
+
+The message reads "Sign this message to generate your Veilnyx shielded account." It keeps the name Veilnyx, the product's earlier name, because changing a single character would produce different keys. Only sign it in an app you trust.
+
+## Shielded address
+
+Your shielded address is 96 bytes. People use it to send you private payments.
+
+| Bytes    | Content                 |
+| -------- | ----------------------- |
+| 0 to 31  | Root address            |
+| 32 to 63 | Sign public key, packed |
+| 64 to 95 | View public key, packed |
+
+Each public key is a point on the curve. It is packed into 32 bytes by storing the y coordinate and one bit for the sign of x.
+
+## Registration
+
+A sender needs your shielded address. Registration lets them find it from your public address or an ENS name.
+
+1. You sign a typed message with your wallet that names your shielded address.
+2. The app builds a proof that you own the shielded address. The proof is bound to your public address, so nobody else can register it for you.
+3. The pool checks the proof and the signature. It adds your root address to the address tree and records the link between your public address and your root address.
+4. The pool emits a `RegisterAddress` event with your shielded address. Senders read it to confirm the shielded address belongs to the public address they mean to pay.
+
+Each public address and each root address can be registered once. The Screener checks both the sender and the signer against the sanctions list on Ethereum.
+
+Registration is public on purpose. It links your wallet to your shielded account, and it is what lets people pay you. It does not reveal what you hold or what you do with it.
+
+## Blinded addresses
+
+Your notes do not carry your root address. They carry a blinded address:
+
+```
+blinded address = Poseidon(root address, revoker public key x, revoker public key y, blinding)
+```
+
+The blinding is a fresh random number for every note. An observer who sees two notes cannot tell that they belong to the same account. The revoker's public key is part of the hash, which ties each note to the disclosure setup you chose. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+
+## Next
+
+* [Notes and commitments](/defi/learn/concepts/notes-and-commitments)
+* [Cryptographic primitives](/defi/learn/concepts/cryptographic-primitives)

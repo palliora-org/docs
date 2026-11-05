@@ -1,0 +1,96 @@
+---
+title: "Fees"
+---
+
+Every fee you can pay when you use Palliora DeFi, and who charges it. Values were read from the networks and from the relayer on **2026-10-16**. Addresses are in [Network reference](/defi/reference/network-reference).
+
+## Summary
+
+| Fee                                  | Charged by            | Value                                                                          |
+| ------------------------------------ | --------------------- | ------------------------------------------------------------------------------ |
+| Pool withdrawal fee                  | The pool              | 0 bps on Ethereum and HyperEVM                                                 |
+| Pool deposit and transfer fee        | The pool              | None                                                                           |
+| Relay fee on Ethereum                | The Paymaster         | The gas cost of your transaction, in a token you choose. No percentage on top. |
+| Relay fee on HyperEVM                | The relayer           | A flat 0.05 USDC                                                               |
+| Return gas for a Private Sub-account | The GasStation        | A flat 0.05 USDC for 0.0005 HYPE                                               |
+| First transfer out of Hyperliquid    | Hyperliquid           | About 1 USDC, once for each Sub-account                                        |
+| Protocol fees                        | The external protocol | Their own. Palliora DeFi adds none.                                            |
+| Network gas                          | The network           | Passed through                                                                 |
+
+Every percentage fee that Palliora DeFi sets is 0 bps today. The flat amounts above are not percentages. They pay for gas and for the service that submits your transaction.
+
+## Pool fees
+
+The pool has one fee setting, the withdrawal fee, in basis points. Read `withdrawFeeBps()` on the pool. It reads 0 on both mainnet pools.
+
+A deposit carries no fee at all. The pool refuses a deposit that states one. A transfer inside the pool has no pool fee. You pay only the relay fee if someone else submits it.
+
+## Relay fees
+
+A relayed transaction hides your wallet as the sender. Someone else submits it and pays the gas, and you repay them from your shielded balance. The fee token and amount become public. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas).
+
+### Ethereum
+
+The Paymaster pays the gas in ETH. You repay it in a token from your notes.
+
+| Item                       | Value                                                                    |
+| -------------------------- | ------------------------------------------------------------------------ |
+| Tokens you can pay with    | WETH, or USDC                                                            |
+| How the amount is set      | The gas cost of the user operation, converted at the price feed          |
+| Added percentage           | None in the conversion                                                   |
+| Price feed staleness limit | 24 hours. See [Status and limits](/defi/reference/status-and-limits). |
+
+The conversion code takes the gas cost in ETH and the price of ETH in the fee token. It adds nothing on top. WETH needs no feed. USDC uses the ETH price feed. The Paymaster refuses a fee below the converted cost.
+
+The SDK helper `quoteUserOpGasCostWithLatestBaseFee` quotes the gas price with 50% headroom by default, so the user operation still lands if the base fee rises. You can set a different headroom. The fee you state is the fee you pay. It is not adjusted after the real gas cost is known.
+
+### HyperEVM
+
+A relayer submits the transaction to the pool. The pool pays the relayer from a fee credit that your transaction creates.
+
+| Item             | Value                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Token            | USDC                                                           |
+| Amount           | 0.05 USDC for each relayed transaction (`50000` in base units) |
+| Added percentage | None                                                           |
+
+The relayer publishes the amount it accepts at `GET /quote`. A fee below the quote is refused. Read the quote before you build the transaction, because the fee is part of the proof. See [Relayer API](/defi/build/relayer-api).
+
+## Private Sub-account fees
+
+These fees apply on HyperEVM. A Sub-account is a fresh address that trades on Hyperliquid. See [Private Sub-accounts](/defi/learn/concepts/private-sub-accounts).
+
+| Step                                        | Fee                                                           | Who gets it    |
+| ------------------------------------------- | ------------------------------------------------------------- | -------------- |
+| Fund the Sub-account                        | 0.05 USDC relay fee, taken from your notes                    | The relayer    |
+| Buy gas to return                           | 0.05 USDC, for 0.0005 HYPE                                    | The GasStation |
+| Return to the pool                          | 0 fee. The return is a deposit, and a deposit carries no fee. | None           |
+| First transfer from Hyperliquid to HyperEVM | About 1 USDC                                                  | Hyperliquid    |
+
+The GasStation is a contract that sells a fixed amount of HYPE for a fixed amount of USDC. You sign one gas purchase authorization, and the Sub-account sends the return. Read `feeUsdc` and `dropWei` at the relayer's `GET /gas/quote` to get the current price and the amount of HYPE.
+
+Hyperliquid charges about 1 USDC the first time a Sub-account moves funds from Hyperliquid back to HyperEVM. It takes the charge from the transfer. Palliora DeFi does not control it and does not receive it.
+
+A new Sub-account that should be able to return therefore needs about 3.05 USDC beyond the margin you trade with. See [Status and limits](/defi/reference/status-and-limits#private-sub-accounts).
+
+## Fees you pay to others
+
+* **Trading fees.** Hyperliquid charges its own fees on the orders you place with a Sub-account. Palliora DeFi adds no trading fee. See Hyperliquid's own fee schedule.
+* **Protocol fees.** A swap, a loan, a stake or a vault deposit through an adaptor costs what the external protocol charges. That includes pool fees on Uniswap and any fee of a Morpho vault. These are not Palliora DeFi fees.
+* **Network gas.** You pay gas from your own wallet for a deposit and for a wallet registration. On HyperEVM the relayer can pay the gas for registration. See [Status and limits](/defi/reference/status-and-limits#registration).
+* **Tree updates.** Anyone can submit a commitment tree update. The app does it for you. If you submit it yourself, you pay its gas.
+
+## How these were read
+
+```bash
+cast call $POOL "withdrawFeeBps()(uint256)" --rpc-url $RPC
+curl -s https://defi.palliora.org/relayer-mainnet/quote
+curl -s https://defi.palliora.org/relayer-mainnet/gas/quote
+```
+
+Run them again for current values. If an amount here differs from what the relayer returns, the relayer's answer is the current one.
+
+## Next
+
+* [Security and audits](/defi/reference/security-and-audits)
+* [Relaying and gas](/defi/learn/concepts/relaying-and-gas)

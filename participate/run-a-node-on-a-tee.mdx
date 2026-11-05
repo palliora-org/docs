@@ -1,0 +1,198 @@
+---
+title: "Run a Node on a TEE"
+---
+
+This walks through running your Palliora node infrastructure inside a hardware-backed Trusted Execution Environment (TEE), using Dstack.
+
+The goal is to move from an ordinary Docker deployment to one where every Palliora node runs inside an Intel TDX Confidential VM, with hardware-enforced isolation and remotely verifiable attestations. Instead of trusting a generic cloud VM or Kubernetes cluster, you can show cryptographic proof that your node, and its configuration, ran in a specific, measured environment.
+
+Dstack bridges Palliora's existing Docker-based node stack and low-level TEE features. It lets you take the standard Palliora `docker-compose.yml`, run it inside a dedicated, attested CVM per deployment, expose the same networking interfaces node operators already expect, and generate TDX quotes directly from inside the node container for downstream verification.
+
+This guide covers three outcomes:
+
+1. **Provisioning a TEE-ready host.** Renting an Intel TDX-capable machine from a cloud provider and preparing it for confidential workloads.
+2. **Running Palliora under Dstack.** Installing Dstack's components on the host, adapting Palliora's `docker-compose.yml`, and deploying through Dstack's UI.
+3. **Proving and observing execution.** Pulling TDX attestation reports and node logs from inside the TEE, so you and anyone verifying your node can build on top of that trust.
+
+By the end, you should be able to reproducibly launch your own TEE-protected node, without relying on a specific managed cloud, while keeping the operational model close to "just run Docker Compose."
+
+## What Dstack is
+
+Dstack is an SDK and orchestration layer that runs your existing Docker apps inside Confidential VMs (CVMs) backed by hardware TEEs, Intel TDX and others.
+
+**Core components:**
+
+* **dstack-vmm**: runs on the bare-metal TDX host. Creates, boots, and stops CVMs, with orchestration and monitoring built in.
+* **dstack-gateway**: a reverse proxy on the host. Terminates TLS and routes `https://<id>-<port>.<base_domain>` to services inside CVMs.
+* **dstack-kms**: a key management service. Generates and seals keys, only unsealing them inside attested CVMs, kept secluded from the host. Serves key derivation requests from `dstack-guest-agent` inside running CVMs over RPC.
+* **dstack-guest-agent**: runs inside each CVM. Handles key derivation and remote attestation, and exposes `/var/run/dstack.sock` so containers can request TDX quotes.
+* **meta-dstack** (a Yocto layer): builds the minimal, hardened Linux image that runs inside CVMs and hosts Docker plus the guest agent, with dedicated, host-secluded memory and resources for confidentiality.
+
+**Key features:** a drop-in replacement for plain Docker (your existing `docker-compose.yml`, no app code changes), per-app CVM isolation with encrypted memory, remote attestation (containers request TDX quotes via `dstack.sock` and prove they ran in the expected environment), and network ingress out of the box through the gateway, no manual nginx.
+
+See [Dstack: Getting Started](https://docs.phala.com/dstack/getting-started) for the full architecture and concepts.
+
+## 1. Rent an Intel TDX machine
+
+You need a VM that supports Intel TDX Confidential VMs (a C3-class machine or similar) from your cloud provider.
+
+**Typical requirements:**
+
+* Machine family: Intel Sapphire Rapids with TDX enabled (for example, `c3-standard-*` on some providers)
+* vCPU/RAM: at least 8 vCPU, 32 to 64 GB RAM
+* Disk: 200+ GB SSD (balanced PD or NVMe)
+* OS: a recent Linux with a TDX-capable kernel (Ubuntu 24.04 LTS with the `TDX_CAPABLE` flag, for example)
+* Security: enable Confidential VM service, Intel TDX, under your provider's security menu
+
+**Checklist when creating the host VM:**
+
+* Enable Confidential VM / Intel TDX in the provider's UI.
+* Use a TDX-capable OS image.
+* Allow these ports in your firewall/security groups: SSH (22, admin access), Dstack-vmm UI (9080), Dstack-gateway HTTP/HTTPS (80, 443, and optionally 9070 for the gateway dashboard).
+
+## 2. Install and run Dstack
+
+On your TDX host, follow the [upstream Dstack getting-started guide](https://docs.phala.com/dstack/getting-started#install-dependencies). Summarized:
+
+```bash
+# Install build dependencies (Ubuntu example)
+sudo apt update
+sudo apt install -y build-essential chrpath diffstat lz4 wireguard-tools xorriso
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Clone meta-dstack
+git clone https://github.com/Dstack-TEE/meta-dstack.git --recursive
+cd meta-dstack
+mkdir build && cd build
+
+# Generate a config template, then edit build-config.sh for your
+# environment (domain, ports, etc.)
+../build.sh hostcfg
+vim ./build-config.sh
+../build.sh hostcfg
+# You should now see: certs images dstack-kms kms.toml run dstack-vmm vmm.toml dstack-gateway gateway.toml
+```
+
+Get a CVM guest image either prebuilt or from source:
+
+```bash
+../build.sh dl 0.5.2   # prebuilt
+# or
+../build.sh guest       # build from source
+```
+
+Run the three core services, each in its own terminal:
+
+```bash
+./dstack-kms -c kms.toml
+sudo ./dstack-gateway -c gateway.toml
+./dstack-vmm -c vmm.toml
+```
+
+The `dstack-vmm` UI is then at `http://<host-ip>:9080`, and the `dstack-gateway` dashboard (if configured) at `https://<host-domain-or-ip>:9070`.
+
+## 3. Prepare Palliora's docker-compose for Dstack
+
+Palliora's standard compose file uses a host-mounted genesis config and private ECR images. For TDX and Dstack, adapt both to make the setup TEE-friendly.
+
+**Genesis config from a remote source.** Instead of mounting a local path:
+
+```yaml
+volumes:
+  - "./palliora-manas.json:/root/palliora-manas.json"
+```
+
+host the genesis config in a public location (a GitHub repo, a Gist, a public Drive link) and fetch it on container start:
+
+```yaml
+services:
+  fetch-config:
+    image: alpine:3.19
+    volumes:
+      - palliora-config-data:/root
+    working_dir: /root
+    command: wget -O /root/palliora-manas.json "<your public genesis config URL>"
+    restart: "no"
+
+  palliora-node:
+    image: public-registry/palliora-node:latest
+    entrypoint: ["/bin/sh", "-c"]
+    volumes:
+      - palliora-config-data:/root/
+volumes:
+  palliora-config-data:
+```
+
+**Switch to public images.** To avoid ECR auth complexity, Palliora publishes images to a public AWS ECR registry you can reference directly:
+
+```yaml
+services:
+  palliora-node:
+    image: public.ecr.aws/palliora/palliora/node:latest
+```
+
+This removes the need for AWS credentials or ECR login inside the TEE.
+
+**Mount `/var/run/dstack.sock`**, so the node container can request TDX quotes:
+
+```yaml
+palliora-node:
+  image: public.ecr.aws/palliora/palliora/node:latest
+  working_dir: /
+  volumes:
+    - /var/run/dstack.sock:/var/run/dstack.sock
+    - palliora-config-data:/root/
+```
+
+That path is provided by the Dstack guest agent inside the CVM, the mount just passes it into your container.
+
+*\[File placeholder: a complete, compiled example `docker-compose.yml` with these changes applied. Ask in the Palliora community channels for the current version.]*
+
+## 4. Deploy through the Dstack UI
+
+1. Open `http://<your-tdx-host-ip>:9080`, the Dstack-vmm web interface.
+2. Click "Deploy App" (or the equivalent button).
+3. Paste or upload the Palliora `docker-compose.yml` from step 3. If you're using private ECR images and need secrets, configure Encrypted Environment Variables, they're encrypted client-side and only decrypted inside the CVM.
+4. Click Deploy.
+
+Dstack then creates a new TDX CVM, boots the Yocto guest image with the guest agent, pulls the public Palliora node image, and starts the Palliora containers inside the CVM.
+
+Check status in the vmm UI: the Logs button shows CVM boot logs and container startup, and the dashboard shows container status, resource usage, and guest-agent health.
+
+On shutdown, the TEE setup wipes Ollama and its model installations, to guarantee a clean-slate boot, as expected from a TEE. To persist Ollama across restarts, move its directory into the TEE's persistent storage.
+
+Once the Palliora client is running, set up Ollama, install your models, create a Palliora account, stake, and join as a Guardian, following [Become a Guardian](/participate/become-a-guardian).
+
+## 5. Get attestations and logs from the TEE
+
+Once your node is running inside the TDX CVM, generate attestation reports and fetch logs programmatically, or use the Trust Centre to verify attestations automatically.
+
+**Trust Centre.** An open-source platform for managing and verifying TEE attestations in the Dstack ecosystem, covering end-to-end verification of hardware attestation, OS integrity, source code authenticity, and domain ownership for TEE-protected applications. [Repository](https://github.com/Phala-Network/trust-center).
+
+The Trust Centre client automatically verifies: hardware authenticity (cryptographic proof your app runs on genuine Intel TDX and Nvidia CC hardware), code integrity (the exact Docker Compose configuration deployed matches your source), OS security (the operating system hasn't been tampered with), and, for gateway deployments, that domain certificates are managed entirely within the TEE. See the [Trust Centre technical documentation](https://docs.phala.com/dstack/trust-center-technical) for automated verification details.
+
+**Requesting a TDX quote directly**, with `/var/run/dstack.sock` mounted, from inside the Palliora container:
+
+```bash
+curl -X POST --unix-socket /var/run/dstack.sock \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "reportData": "0x1234deadbeef00000000000000000000000000000000000000000000000000"
+      }' \
+  http://dstack/GetQuote | jq .
+```
+
+Or with the newer interface:
+
+```bash
+curl --unix-socket /var/run/dstack.sock \
+  "http://localhost/GetQuote?report_data=0x1234deadbeef" | jq .
+```
+
+`reportData` is a 64-byte, app-defined hex field hashed into the TDX report, Palliora can use it to bind the quote to a particular genesis hash or config version. The response includes the TDX quote (base64), the embedded `report_data`, and measurement fields and signatures.
+
+## Recap
+
+You rented a TDX-capable machine, installed and ran Dstack (vmm, gateway, kms), adapted Palliora's `docker-compose.yml` for Dstack (remote genesis, public images, the `dstack.sock` mount), deployed through the Dstack UI, and verified attestation through the Trust Centre or by pulling TDX quotes directly from inside the TEE.

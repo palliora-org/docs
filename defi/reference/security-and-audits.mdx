@@ -1,0 +1,94 @@
+---
+title: "Security and audits"
+---
+
+What has been reviewed, what was found, and what you still trust. Figures are from ABDK's report 1.2, dated 2026-07-17.
+
+## The short version
+
+ABDK audited the protocol, the circuits and the guard rails. They found 207 issues. Both Critical issues and all eight Major issues were fixed. Most of the rest are about naming, typing, gas and readability. None of the 11 issues that are not fixed is above Moderate.
+
+<a href="https://drive.google.com/file/d/1A_aWSK6yydnnOQUvry8Y_Ut94-sRpZKo/view" className="gb-button gb-button-primary">Read the ABDK audit report</a>
+
+## What was reviewed
+
+| Component                                                                                                                                         | Reviewed by     | Status                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ---------------------------------------------------- |
+| Pool, Gateway, Paymaster, Hasher, verifier registry, Merkle tree libraries, shielded address and transaction libraries, and the adaptors in scope | ABDK            | Audited. Report 1.2, 2026-07-17.                     |
+| Circuits                                                                                                                                          | ABDK            | Audited. Report 1.2, 2026-07-17.                     |
+| Guard rails: deposit limits, the total value cap and sanctions screening                                                                          | ABDK            | Audited. Report 1.2, 2026-07-17.                     |
+| Disclosure request manager                                                                                                                        | Internal review | Reviewed internally. It is not an independent audit. |
+| Private Sub-account contracts: the funding adaptor and the GasStation                                                                             | Internal review | Reviewed internally. It is not an independent audit. |
+
+An internal review is not an audit. It is listed so you can see what has had a second pair of eyes and by whom.
+
+### What the audit did not cover
+
+* The mempool contracts.
+* The EIP-712 library.
+* The verifier contracts. They are generated from the circuits and come from the [ZK ceremony](/defi/reference/zk-ceremony).
+* The registration path that uses an external proof aggregator.
+* Third-party code: OpenZeppelin, the ERC-4337 account abstraction contracts and Chainlink. These have their own audits.
+* Adaptors that are not live. Beefy, Curve, Ethena, 1inch and Rocket Pool were in the audit scope but are not deployed on Ethereum. See [Network reference](/defi/reference/network-reference).
+
+## Findings by severity
+
+| Severity  | Found   | Fixed   | Acknowledged | Open  |
+| --------- | ------- | ------- | ------------ | ----- |
+| Critical  | 2       | 2       | 0            | 0     |
+| Major     | 8       | 8       | 0            | 0     |
+| Moderate  | 54      | 50      | 2            | 2     |
+| Minor     | 143     | 136     | 5            | 2     |
+| **Total** | **207** | **196** | **7**        | **4** |
+
+The numbers split by scope as follows.
+
+| Scope                 | Found | Fixed |
+| --------------------- | ----- | ----- |
+| Protocol and circuits | 168   | 162   |
+| Guard rails           | 39    | 34    |
+
+Acknowledged means the team read the finding and chose not to change the code, for a stated reason. Open means the finding is not fixed yet.
+
+## Timeline
+
+| Date       | Event                                |
+| ---------- | ------------------------------------ |
+| 2026-03-27 | ABDK report 1.0                      |
+| 2026-06-27 | ABDK report 1.1                      |
+| 2026-07-15 | ZK ceremony finalised                |
+| 2026-07-17 | ABDK report 1.2                      |
+| 2026-07-30 | Ethereum pool deployed               |
+| 2026-09-30 | HyperEVM pool deployed               |
+| 2026-10-06 | Current Ethereum implementation live |
+
+## What you trust
+
+Audits reduce risk. They do not remove it. These are the parts of Palliora DeFi where you rely on people and on keys, not only on code.
+
+* **The pool owner.** The owner is a hardware-wallet account. It can pause the pool, upgrade it, register assets, adaptors and revokers, and change the limits. The pool is upgradeable, so you trust the owner to upgrade it with care. See [Status and limits](/defi/reference/status-and-limits#who-can-change-these-settings).
+* **Price feeds.** A stale or invalid price stops deposits of that asset. It does not stop withdrawals or transfers. ABDK listed this as finding CVF-2-1, and the team accepted it, because stopping is safer than taking a wrong price. The owner can replace or remove a feed.
+* **The disclosure network.** The revoker and 7 of 10 Decom guardians together can de-anonymize a transaction. Neither side can do it alone. The revoker keeps the report on Palliora DA, where only the revoker, or any third party the revoker grants access to, can read it. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure) and [Palliora integration](/defi/learn/concepts/palliora-integration).
+* **Relayers and bundlers.** They see when a transaction arrives and the proof it carries. That data does not show who you are. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas).
+* **The ceremony.** The proving keys are safe if at least one contributor destroyed their randomness. See [ZK ceremony](/defi/reference/zk-ceremony).
+
+## Test networks
+
+Do not put real value on a test network. The HyperEVM testnet verifiers were generated locally and their setup secrets are public, so anyone can forge a proof there. See [ZK ceremony](/defi/reference/zk-ceremony#test-networks).
+
+## Report a vulnerability
+
+Email **[security@palliora.org](mailto:security@palliora.org)**. Do not open a public issue.
+
+Please include:
+
+* the steps to reproduce it;
+* any code, logs or screenshots that help;
+* the impact as you understand it.
+
+We acknowledge your report, investigate it and prepare a fix if one is needed. We disclose a vulnerability publicly only after it is confirmed, a fix is available, and we have agreed the timing with you.
+
+## Next
+
+* [ZK ceremony](/defi/reference/zk-ceremony)
+* [Status and limits](/defi/reference/status-and-limits)

@@ -1,0 +1,33 @@
+---
+title: "Threshold Encryption"
+---
+
+Threshold Encryption protects data by making sure no single party can decrypt it alone. Instead of one secret key, decryption power is split across multiple participants, and only when a predefined number of them cooperate can decryption happen. Too few participants, and the data stays encrypted. Palliora uses this to protect sensitive data, encrypted payloads, and critical keys such as validator keys, so secrets are never controlled by a single entity.
+
+## The problem it solves
+
+Traditional encryption has a single point of failure: whoever holds the secret key controls the data, and if that key is compromised, lost, or misused, confidentiality breaks. In a decentralized system like Palliora, where validators, Guardians, data providers, and compute providers are all independent and untrusted, there usually shouldn't be any single party with full decryption authority. Threshold encryption removes that single point of trust, compromising one participant isn't enough to compromise the data, and it also improves resilience: decryption can still proceed as long as the required threshold is met, even if some participants fail or go offline.
+
+## How it works
+
+A secret key is never stored in one place. A master secret is split into cryptographic shares using a threshold scheme (typically Shamir's Secret Sharing), and each authorized participant gets one share. To decrypt data, a minimum number of participants (the threshold) has to cooperate and combine their shares to reconstruct the decryption capability. Fewer than that, and reconstruction is mathematically impossible.
+
+In Palliora, Guardian nodes typically hold decryption shares, shares may also protect validator keys, and decryption only happens when the conditions defined in a Compute Contract are satisfied. Data can stay encrypted through storage, coordination, and even parts of execution, only decrypted at the exact moment the contract authorizes.
+
+## Trust and guarantees
+
+Threshold encryption cuts trust assumptions significantly: compromising a single Guardian or validator isn't enough to access protected data, and the system tolerates the failure or compromise of a limited number of participants as long as malicious actors don't reach the threshold. That gives Palliora better security, better fault tolerance, and less reliance on any single entity, reinforced by economic incentives that reward cooperation and penalize misbehavior.
+
+## What it isn't
+
+Threshold encryption doesn't decide who should have access to data or when, those rules live in Compute Contracts. It doesn't execute computation or verify results either, it's a confidentiality mechanism that works alongside Confidential Compute and verification. On its own it isn't a complete security model, it's one of the core building blocks Palliora uses to enforce trust without centralizing it.
+
+## How it fits into Palliora
+
+Threshold encryption is the key mechanism Guardians use to enforce confidentiality. It lets the Data Availability layer store encrypted data without knowing its contents, stops any single Guardian or validator from unilaterally decrypting data, and lets Compute Contracts define precise, enforceable release conditions. Together with Data Availability, Confidential Compute, and Validators, it's what makes selective, secure data sharing possible in a decentralized network.
+
+## Used for disclosure, too
+
+The same mechanism protects the revoker key that seals each user's identity. That is why no single party can unmask a user: a quorum of Guardians has to approve a signed, publicly logged request first. See [Accountable privacy](/learn/concepts/accountable-privacy).
+
+On testnet, threshold-encrypted compute uses Guardian groups of exactly three.

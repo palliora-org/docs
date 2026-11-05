@@ -1,0 +1,53 @@
+---
+title: "Build with a Coding Agent"
+---
+
+You don't have to write this by hand. Point an AI coding agent (Claude Code, Cursor, or similar) at Palliora's documentation and have it build your integration directly.
+
+A note on terms before anything else: "coding agent" on this page always means an AI coding assistant. It has nothing to do with Palliora's own Agent concept, a published Compute Artifact you deploy and run, covered in [Compute Artifacts: publish and run](/build/guides/compute-artifacts). Different thing, same word, worth keeping straight.
+
+## Why this works well here
+
+A coding agent is only as good as the context it has. Hand it a vague "go use this SDK" instruction and it guesses, often wrong, at function names, argument shapes, and failure modes. Palliora's docs are built to prevent that: [SDK Reference](/build/reference/sdk-reference) is checked against the actual package source, [Troubleshooting](/build/reference/troubleshooting) documents real failure causes instead of leaving an agent to rediscover them by trial and error, and [`llms.txt`](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/llms.txt) indexes the whole site so an agent can orient in one read instead of crawling page by page.
+
+## Start here: the skill file
+
+[`palliora.skill.md`](/build/coding-agents/palliora.skill) is a single, dense file: setup, the core call pattern, the fee rules that trip up naive implementations, and the most common failures, condensed from the rest of this site.
+
+<Card title="palliora.skill.md" icon="file-arrow-down" href="https://raw.githubusercontent.com/palliora-org/docs/main/files/palliora.skill.md">
+
+The Palliora skill file. Save it as `.claude/skills/palliora/SKILL.md` (Claude Code) or your coding agent's equivalent skills/context directory.
+
+</Card>
+
+It has working Palliora competence immediately, without reading the whole site first.
+
+## A starter prompt
+
+```
+Read https://docs.palliora.org/llms.txt and
+https://docs.palliora.org/build/coding-agents/palliora.skill.md
+first, then build [what you want]. Use @palliora.org/chainsdk against
+wss://staging.manas-rpc.palliora.org. Follow the patterns in Quickstart
+and Troubleshooting exactly, especially the fee-floor and guardian-
+response rules, don't improvise around them. Use encrypted compute unless
+I say otherwise.
+```
+
+The instruction to read Troubleshooting *before* writing fee or agreement code matters: the two-gate fee model and the silent-hang-on-offline- guardian behavior are exactly the kind of thing a model will guess wrong without it.
+
+## Two known-good targets to check the result against
+
+Having something to compare the agent's output to matters more than the prompt itself.
+
+**"Build a CLI that asks Palliora a question and prints the answer."** The agent's output should land close to [Quickstart](/build/quickstart), one script, `inferenceCompute` plus polling for `compute.result`, nothing more exotic than that for a first pass.
+
+**"Build a chat-completions-compatible chat server backed by Palliora."** Compare against [Build a chat-completions-compatible service](https://github.com/palliora-org/palliora-docs-with-ai/tree/main/ai/build/guides/chat-completions-service.md). If the agent's version skips per-request guardian selection or hardcodes a single dev signer for every user, that's the same gap the guide calls out explicitly under "where this needs to grow up before production", worth flagging back to the agent rather than accepting.
+
+## If the agent gets stuck
+
+Point it at [Troubleshooting](/build/reference/troubleshooting) directly rather than letting it retry blindly. Most failures here (a hanging transaction, a rejected fee, a timeout) have a specific, known cause, not something an agent will reliably reason its way to from the error message alone.
+
+## For the agent itself
+
+If you're the agent reading this, not the person who pointed you here, see [For Agent-Assisted Developers](/build/coding-agents/for-agent-assisted-devs) for guidance written directly to you, and load [`https://docs.palliora.org/build/coding-agents/palliora.skill.md`](/build/coding-agents/palliora.skill) before writing any code.

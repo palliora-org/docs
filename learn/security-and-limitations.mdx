@@ -1,0 +1,40 @@
+---
+title: "Security and Limitations"
+---
+
+Every concept page in this section has its own "what this isn't" section, scoped to that one mechanism. This page pulls the picture together: what Palliora actually guarantees end to end, and where the real, current edges are. Written for anyone evaluating whether Palliora's guarantees hold up to the claim, not just how the pieces fit together.
+
+## What's actually guaranteed
+
+* **No single party can decrypt protected data alone.** Threshold encryption splits that ability across a Guardian quorum. Compromising one Guardian isn't enough, see [Threshold Encryption](/learn/concepts/threshold-encryption).
+* **Committed data can't be silently altered or withheld.** Erasure coding and KZG commitments let any node confirm data exists without trusting a single storage provider, see [Data Availability](/learn/concepts/data-availability).
+* **A computation's terms are fixed before it runs.** A Compute Contract locks fees, participants, and rules, publicly, before execution starts, see [Compute Contracts](/learn/concepts/compute-contracts).
+* **Guardian misbehavior has a financial cost.** Guardians and Validators stake PALI as collateral and can be slashed for provable misconduct, see [Guardian](/learn/concepts/guardian) and [Validator](/learn/concepts/validator).
+* **No single party can unmask a user.** Disclosure needs a signed request, a Guardian quorum and a separate revoker, and every request is publicly logged, see [Accountable privacy](/learn/concepts/accountable-privacy).
+
+These are the properties that hold regardless of which specific execution mode (trusted, TEE, SMPC, FHE) a given Compute Contract uses.
+
+## What depends on which mode you choose
+
+Confidentiality during execution itself is a spectrum, not a single guarantee, chosen explicitly per contract:
+
+* **Trusted execution** means exactly what it says: the compute node can see your input. You're trusting that specific node's operator.
+* **TEE-based Confidential Compute** hides data from the node's operator and host OS, backed by hardware attestation, but it relies on the hardware's own security guarantees and a correct TEE implementation holding up. It is live on testnet in Intel TDX, but only on Guardians with the hardware; not every Guardian has it. It doesn't, by itself, guarantee the computation was correct, only that it ran isolated, see [Confidential Compute](/learn/concepts/confidential-compute).
+* **SMPC and FHE** modes are referenced throughout Palliora's architecture material as supported confidentiality options but are on the roadmap rather than live today, don't assume availability without checking current network capability first.
+* **ZK** appears as a compute type in the CLI and SDK.
+
+Picking a mode is a real security decision, not a performance knob.
+
+## Known, open gaps
+
+Stated plainly rather than glossed over:
+
+* **Guardian result-decryption keys aren't dynamically discoverable.** Threshold-encrypted inference needs a specific guardian node's Ed25519 result-encryption key, and there's currently no reliable public way to look one up for an arbitrary guardian. The practical workaround is an out-of-band, manually maintained key map, see [Encrypted Compute](/build/guides/encrypted-compute) for the current state of this. Until it's resolved, any integration that needs to work across guardian sets it doesn't already have confirmed keys for has a real, unsolved dependency.
+* **A verified attestation doesn't verify correctness.** TEE attestation proves the expected code ran in a genuine enclave, it says nothing about whether that code's logic was correct. Palliora's Verifier role exists specifically to check outputs against a contract's own tests, and it is live on testnet. But a contract that specifies weak or no verification criteria gets weak or no correctness guarantee, regardless of how strong its confidentiality mode is.
+* **Guardian unavailability fails silently, not loudly.** A compute agreement naming an offline or unresponsive guardian doesn't error, it hangs indefinitely in a future queue, see [Troubleshooting](/build/reference/troubleshooting). Don't mistake "no error yet" for "working."
+* **The testnet Guardian set is small.**
+* **Audit scope.** A security audit has been completed. An audit covers what it covers; check its scope before relying on it.
+
+## What's explicitly out of scope here
+
+This page covers Palliora's protocol-level guarantees. It doesn't cover the security of any specific application built on Palliora (how [Palliora DeFi](/products/palliora-defi) or [Palliora AI](/products/palliora-ai) handle their own application-layer concerns), the security of your own key custody, or infrastructure-level concerns for node operators, which [Participate](/participate/participate) addresses separately.

@@ -1,0 +1,46 @@
+---
+title: "Data Availability"
+---
+
+Data Availability makes sure data referenced on Palliora actually exists, stays accessible, and hasn't been tampered with. Data is encrypted before it enters, so availability never means visibility. Contracts, computations, and verification all depend on data being reliably retrievable. Once something is committed to the network, Data Availability guarantees it can't be silently removed, censored, or altered.
+
+## The problem it solves
+
+In a decentralized system, agreeing on data isn't enough, participants also need confidence that the data can actually be retrieved later by anyone authorized to access it. At scale, that's hard: large volumes of data are expensive to store and distribute, and requiring every node to download and verify everything doesn't scale, while relying on a few storage providers brings censorship risk and trust assumptions right back. Without strong Data Availability guarantees, contracts get fragile, computation can stall, verification becomes impossible, and a malicious actor can withhold data without getting caught. Data Availability addresses scalability, cost, and censorship resistance at the same time.
+
+## How it works
+
+When data is submitted:
+
+1. **Encryption, if needed.** Data is encrypted when confidentiality is required.
+2. **Sharding.** The data is split into smaller chunks (shards).
+3. **Erasure coding.** Reed-Solomon erasure coding adds redundancy, so the original data can be reconstructed even if some shards are missing.
+4. **KZG commitments.** Each shard gets a KZG polynomial commitment: small, efficient, and immutable once recorded.
+
+Rather than storing raw data directly in the public record, the network stores cryptographic commitments to it.
+
+## Sampling and verification
+
+Nodes don't need to download the full dataset. They randomly sample a subset of commitments and request the matching shards; if the sampled shards are available and match their commitments, that's strong probabilistic evidence the whole dataset is available. If a node fails to provide requested data, that failure can be proven with a fraud-proof, and the responsible node can be penalized, which is what makes honest storage the economically rational choice.
+
+## Why KZG commitments
+
+KZG commitments give Palliora proof sizes that stay small, verification that needs no multi-round communication, and strong cryptographic binding so committed data can't be altered. That combination is what lets the system scale without sacrificing integrity.
+
+## Trust and guarantees
+
+Data can't be silently censored or removed, can't be altered without detection, and its availability can be challenged at any time, all without requiring trust in any single storage provider; the guarantees come from cryptography and economic incentives, not reputation or permission. Confidentiality is a separate concern: data may be encrypted before it ever enters the Data Availability layer, so availability never implies visibility.
+
+## What it isn't
+
+Data Availability doesn't decide who's allowed to access data or when, doesn't execute computation, doesn't verify computation results, and doesn't enforce contract logic. Its job is deliberately narrow: make sure committed data exists, stays intact, and can be retrieved when needed.
+
+## How it fits into Palliora
+
+Compute Contracts reference data without embedding it directly. Guardians rely on Data Availability to retrieve inputs and store outputs. Verifiers use it to check integrity. Compute nodes depend on it to access data reliably. Without Data Availability, a Palliora contract would just be a promise; with it, the contract becomes enforceable.
+
+## A simple example
+
+Take a 100 GB dataset. Instead of storing it as one object, Palliora splits it into 1,000 shards, adds redundancy through erasure coding, and commits to each shard with a compact KZG commitment. Nodes randomly sample a subset of shards, say 100 of them, and request those. If the sampled shards are available and valid, it's overwhelmingly likely the entire 100 GB dataset is available, without anyone needing to download all of it. That's how Palliora gets scalability without giving up its guarantees.
+
+On testnet, each node commits 300 GB of DA storage.

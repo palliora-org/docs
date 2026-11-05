@@ -1,0 +1,89 @@
+---
+title: "Glossary"
+---
+
+Terms used across Palliora DeFi, in alphabetical order. Each links to the page that explains it.
+
+**Accountable privacy.** Palliora's model for private systems. A transaction is private by default, and it can be de-anonymized when there is a real reason, through due process and never through a master key. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+
+**Adaptor.** A small contract between the pool and another protocol. It lets a private transaction swap, lend or stake. See [Adaptors](/defi/learn/concepts/adaptors).
+
+**Address tree.** The Merkle tree of registered root addresses. Its depth is 20. See [Notes and commitments](/defi/learn/concepts/notes-and-commitments).
+
+**Asset id.** The number the pool gives each registered token. Ids are specific to a pool. See [Network reference](/defi/reference/network-reference).
+
+**Blinded address.** The hash of a root address, the revoker's public key and a fresh random number. A note carries a blinded address and not your root address. See [Shielded accounts](/defi/learn/concepts/shielded-accounts).
+
+**Bundler.** A service that collects ERC-4337 user operations and submits them to Ethereum. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas).
+
+**Commitment.** A hash of a note that goes on the public record. The note itself stays private. See [Notes and commitments](/defi/learn/concepts/notes-and-commitments).
+
+**Commitment tree.** The Merkle tree of all commitments. Its depth is 25.
+
+**Compute Contract.** A Palliora contract that coordinates storing and retrieving a report for the authorized actors. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+**Data Availability.** Palliora's layer that keeps data available and shows if it was altered. The revoker's report is stored on it, and this page calls it Palliora DA. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+**Decom guardian.** A node that holds one share of the disclosure key and answers valid requests with a partial decryption. It is not a Palliora Guardian. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+
+**De-anonymize.** To recover the notes a transaction created and who sent it. The revoker does it together with a threshold of Decom guardians.
+
+**Disclosure.** Showing what a private transaction did, either by the revoker and the Decom guardians together or by you giving a view key to someone you choose.
+
+**Disclosure key.** The public key every transaction's seed is encrypted to. It is the guardians' shared secret times the generator, plus the revoker's public key.
+
+**DKG.** Distributed key generation. The way the guardians make their shared secret without any one of them holding the whole of it. See [Guardian key operations](/defi/participate/guardian-key-operations).
+
+**EntryPoint.** The standard ERC-4337 contract that runs user operations. The pool uses version 0.7.
+
+**Funding adaptor.** The adaptor that moves USDC from the pool to a Private Sub-account on HyperEVM. See [Private Sub-accounts](/defi/learn/concepts/private-sub-accounts).
+
+**GasStation.** A contract that sells a fixed amount of HYPE for a fixed amount of USDC, so a Private Sub-account can pay gas to return. See [Fees](/defi/reference/fees).
+
+**Gateway.** The contract that acts as the account for an ERC-4337 user operation that wraps a shielded transaction. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas).
+
+**Groth16.** The proof system Palliora DeFi uses. See [Cryptographic primitives](/defi/learn/concepts/cryptographic-primitives).
+
+**Note.** A piece of value of one token that belongs to one account. You spend a whole note and may get change back. See [Notes and commitments](/defi/learn/concepts/notes-and-commitments).
+
+**Nullifier.** A value revealed when a note is spent. The pool rejects a second transaction that reveals the same one, so a note cannot be spent twice.
+
+**Palliora Core.** Palliora's privacy engine. Palliora DeFi uses it to keep the revoker's report. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+**Palliora Guardian.** A node in Palliora's silent threshold encryption layer. It holds a share of the key that protects a stored report. It is not a Decom guardian.
+
+**Paymaster.** A contract that pays the gas on Ethereum and takes its fee from your notes. Its address is bound into the proof. See [Fees](/defi/reference/fees).
+
+**Pool.** The shielded pool contract. It holds the tokens, records commitments and nullifiers, and checks proofs. There is one on Ethereum and one on HyperEVM. See [Network reference](/defi/reference/network-reference).
+
+**Poseidon.** The hash function used inside the circuits.
+
+**Private Sub-account.** A fresh Hyperliquid trading address that you fund from your shielded balance and bring back. See [Private Sub-accounts](/defi/learn/concepts/private-sub-accounts).
+
+**Registration.** The public step that links your wallet address to your shielded address, so people can pay you. See [Shielded accounts](/defi/learn/concepts/shielded-accounts).
+
+**Relayer.** A service that submits a proven transaction and pays the gas. On HyperEVM it calls the pool directly. See [Relayer API](/defi/build/relayer-api).
+
+**Report.** The encrypted record a revoker writes to Palliora DA after it de-anonymizes a transaction. Only the revoker, or any third party the revoker grants access to, can read it. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+**Revoker.** The party that asks to de-anonymize a transaction. It holds a private key that is one half of the disclosure key. The pool owner registers each revoker.
+
+**Root address.** A hash of your sign public key and your view private key. It is the identity your notes belong to.
+
+**Settling.** The step where queued commitments join the commitment tree, through a tree update. A note can be spent only after it is settled.
+
+**Shielded account.** Your private account in the pool. Your wallet signature recreates it.
+
+**Shielded address.** The 96-byte address people use to send you private payments.
+
+**Sign key.** The key pair that authorizes spending. Keep the private key secret.
+
+**Silent threshold encryption.** The scheme Palliora uses to encrypt a stored report to a group of Palliora Guardians, with no interaction between them.
+
+**Staleness limit.** How old a price feed may be before the pool refuses deposits of that asset. See [Status and limits](/defi/reference/status-and-limits).
+
+**Tree update.** A transaction with a proof that adds queued commitments to the commitment tree. Anyone can submit it.
+
+**View key.** The key pair that lets you read your balance and history. Sharing the private key shows everything, and it cannot spend.
+
+**ZK ceremony.** The multi-party setup that made the proving and verification keys. See [ZK ceremony](/defi/reference/zk-ceremony).

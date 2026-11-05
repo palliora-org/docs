@@ -1,0 +1,100 @@
+---
+title: "FAQ"
+---
+
+Short answers, with a link to the page that has the detail.
+
+## The basics
+
+### What is Palliora DeFi?
+
+Palliora DeFi (formerly Veilnyx) is a privacy system for payments and DeFi. You deposit tokens into a shielded pool, send them privately, and use other protocols from the same shielded balance. See [How Palliora DeFi works](/defi/learn/how-it-works).
+
+### Is it live?
+
+Yes. It is live on Ethereum and on HyperEVM. Launch limits are in force. See [Status and limits](/defi/reference/status-and-limits).
+
+### Why are there deposit limits?
+
+They are on purpose. The protocol is young, so deposits and total value are capped. The limits will go up in steps, and each change is announced. The current values are in [Status and limits](/defi/reference/status-and-limits).
+
+### Which networks does it run on?
+
+Ethereum and HyperEVM. Sepolia and HyperEVM testnet are for testing. Addresses are in [Network reference](/defi/reference/network-reference).
+
+### Is it audited?
+
+ABDK audited the protocol, the circuits and the guard rails. Both Critical and all eight Major findings were fixed. See [Security and audits](/defi/reference/security-and-audits).
+
+## Privacy
+
+### Is it fully anonymous?
+
+No. Inside the pool, a transfer hides the sender, the recipient, the token and the amount. Deposits and withdrawals are public, because they touch your wallet. How well you blend in depends on how many people use the pool. See [Privacy model](/defi/learn/concepts/privacy-model).
+
+### Who can see what I do?
+
+The public sees only what is public in [Privacy model](/defi/learn/concepts/privacy-model). A relayer or bundler sees a transaction and when it arrived, not who you are. The revoker and a threshold of Decom guardians can de-anonymize a transaction, and the revoker keeps the result as a report on Palliora DA. Only the revoker, or any third party the revoker grants access to, can read the report. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure) and [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+### Can anyone de-anonymize me alone?
+
+No. De-anonymizing a transaction takes the revoker and a threshold of Decom guardians. On mainnet, 7 of 10 guardians must answer. The revoker alone can tell which registered account spent a note. It cannot read the amount, the token or the recipient from that.
+
+### Can I show my history to someone?
+
+Yes. Give them your view key. They can read your balance and history. They cannot spend, because spending needs your sign key.
+
+### What if I lose my wallet?
+
+You lose the account. Nothing else stores your keys. If you still have the wallet, sign the same message again and you get the same account back. See [Shielded accounts](/defi/learn/concepts/shielded-accounts).
+
+### Why does the wallet message say Veilnyx?
+
+Your keys come from your signature of that exact text. A different text makes a different account. The message keeps the earlier name so that existing accounts keep working. Sign it only in the Palliora DeFi app. See [Rename map](/defi/reference/rename-map).
+
+## Fees
+
+### What do I pay?
+
+The pool charges no percentage fee. A relayed transaction pays a relay fee from your notes. On Ethereum it is the gas cost. On HyperEVM it is a flat 0.05 USDC. See [Fees](/defi/reference/fees).
+
+### Why does a deposit not carry a fee?
+
+A deposit comes from your wallet, so your wallet pays the gas. The pool refuses a deposit that states a fee.
+
+## Private Sub-accounts
+
+### Why a new Sub-account for each position?
+
+Two positions on one address link to each other. One slip on either exposes both. The app opens each position in a new Private Sub-account and does not reuse a spent one. See [Private Sub-accounts](/defi/learn/concepts/private-sub-accounts).
+
+### Is the position private?
+
+No. The position on Hyperliquid is public. What is hidden is the link between you and the trading address.
+
+### How much do I need to fund?
+
+At least 1 USDC. To be able to bring the money back, about 3.05 USDC beyond the margin you trade with. See [Status and limits](/defi/reference/status-and-limits#private-sub-accounts).
+
+## For developers
+
+### Which SDK version do these pages use?
+
+SDK 1.4.3. The package names are moving from `@veilnyx-sdk/*` to `@palliora.org/defi-*`. See [Rename map](/defi/reference/rename-map).
+
+### Does the SDK submit transactions?
+
+No. It builds, signs and proves. You submit the transaction with a wallet, a bundler or a relayer. See [Build on Palliora DeFi](/defi/build/build).
+
+### Can I add my protocol?
+
+Yes. Write an adaptor and ask the pool owner to register it. See [Integrate a DeFi protocol](/defi/build/integrate-a-protocol).
+
+### My transaction was refused. Why?
+
+Start with [Troubleshooting](/defi/build/troubleshooting). It lists the errors from the SDK and the pool, and what causes them.
+
+## Next
+
+* [Glossary](/defi/reference/glossary)
+* [Changelog](/defi/reference/changelog)

@@ -1,0 +1,152 @@
+---
+title: "Encrypted Compute"
+---
+
+[Quickstart](/build/quickstart) and the plaintext guides all use plain, unencrypted inference: the prompt and the answer are both publicly visible to anyone who looks. That's fine for learning the pattern, but it isn't what most real use cases want. This page covers the threshold-encrypted path: the input stays encrypted until a Guardian quorum decrypts it inside the compute pipeline, and the result is re-encrypted back to you before it ever leaves the Guardian node.
+
+Read [Threshold Encryption](/learn/concepts/threshold-encryption) and [Confidential Compute](/learn/concepts/confidential-compute) first if you haven't, this page assumes you know what a guardian group and a threshold are.
+
+## The pieces
+
+Encrypted inference needs:
+
+1. A **guardian group** of exactly three Guardians, publicly registered, with its derived crypto parameters (`groupPk`, `tauParams`, `aggKey`).
+2. A **session key**, derived from those group parameters, used to encrypt your actual payload.
+3. A **result cipher**, pointing at your own encryption key, so the Guardian that processes your request encrypts the answer back to you specifically rather than leaving it in plaintext.
+
+```ts
+import {
+  init,
+  getKeyring,
+  getEncKeyring,
+  createGuardianGroupAndWatch,
+  getGuardianAddress,
+} from "@palliora.org/chainsdk";
+
+init({ pallioraWs: "wss://staging.manas-rpc.palliora.org" });
+
+const keyring = await getKeyring();
+const encKeyring = await getEncKeyring();
+const account = keyring.addFromUri("//Bob");
+const encAccount = encKeyring.getPairs()[0];
+
+const guardians = (await getGuardianAddress()).slice(0, 3).map((g) => g.address);
+const groupInfo = await createGuardianGroupAndWatch(account, guardians, 20);
+// { groupId, groupPk, tauParams, aggKey, guardians }
+```
+
+## Encrypting the input
+
+```ts
+import {
+  testCrypt,
+  gen_stretched_key,
+  encrypt,
+  hexToUint8Array,
+} from "@palliora.org/chainsdk";
+
+function stripHex(h) {
+  return h.startsWith("0x") ? h.slice(2) : h;
+}
+
+const { encoded: cypherText, ikm } = testCrypt(
+  stripHex(groupInfo.tauParams),
+  stripHex(groupInfo.aggKey),
+);
+const symKey = gen_stretched_key(hexToUint8Array(stripHex(ikm)));
+
+const payload = new TextEncoder().encode(
+  JSON.stringify({ model: "gemma3:1b", messages: [{ role: "user", content: "hi" }], stream: false }),
+);
+const { ciphertext, nonce } = encrypt(payload, symKey);
+```
+
+## Building the cipher objects and submitting
+
+```ts
+const inputCipher = {
+  ThresholdHybrid: {
+    threshold_params: {
+      SilentThreshold: {
+        td_params: Array.from(hexToUint8Array(stripHex(cypherText))),
+        pk_bytes: Array.from(hexToUint8Array(stripHex(groupInfo.groupPk))),
+        tau_params: Array.from(hexToUint8Array(stripHex(groupInfo.tauParams))),
+      },
+    },
+    symmetric_params: { ChaCha20Poly1305: { nonce: Array.from(nonce) } },
+  },
+};
+
+// nodePub: the specific guardian node's Ed25519 result-encryption key, see the caveat below
+const resultNonce = crypto.getRandomValues(new Uint8Array(12));
+const resultCipher = {
+  AsymmetricHybrid: {
+    asymmetric_params: {
+      Ed25519: {
+        recipient_public_key: Array.from(encAccount.publicKey),
+        ephemeral_public_key: Array.from(nodePub),
+        kdf: "HkdfSha256",
+        salt: null,
+        info: null,
+      },
+    },
+    symmetric_params: { ChaCha20Poly1305: { nonce: Array.from(resultNonce) } },
+  },
+};
+
+import { createAgreement } from "@palliora.org/chainsdk";
+
+const result = await createAgreement(
+  {
+    contractType: "Active",
+    guardians: groupInfo.guardians,
+    compute: {
+      cipher: inputCipher,
+      computerIndices: groupInfo.guardians.map((_, i) => i),
+      fees: 0,
+      computeRate: 0,
+      deadline: 0,
+      confidentiality: { Trusted: 0 },
+      feeFunction: null,
+      input: { Inline: { data: Array.from(ciphertext) } },
+      program: { NativeExecute: "Inference" },
+    },
+    resultCipher,
+  },
+  account,
+);
+```
+
+## Who can see the plaintext
+
+The example above sets `confidentiality: { Trusted: 0 }`. In trusted mode the prompt stays encrypted on the ledger and in Data Availability, and the answer comes back encrypted to you, but the compute node that runs the model does see the prompt while it works. To hide it from the node's operator too, run in a TEE, see [Execution modes](/learn/concepts/confidential-compute#execution-modes). TEE execution is live on testnet on Guardians with Intel TDX hardware.
+
+## Decrypting the result
+
+Once the `compute.result` extrinsic lands (same polling pattern as [Quickstart](/build/quickstart)), decrypt it with your own encryption key and the same guardian node public key used above:
+
+```ts
+import { gen_shared_key, decrypt } from "@palliora.org/chainsdk";
+
+const selfKey = encAccount.encodePkcs8().slice(16, 48);
+const sharedKey = gen_shared_key(selfKey, nodePub);
+const plain = decrypt(ciphertextFromResult, sharedKey, nonceFromResult);
+```
+
+## The known rough edge: finding `nodePub`
+
+Every snippet above has a `nodePub`, the specific guardian node's Ed25519 result-encryption key, and it's the one piece the SDK doesn't currently give you a way to look up for an arbitrary guardian by address. The publicly recorded field that looks like it should hold this (`staking.guardians(address).pubKey`) is actually that guardian's sr25519 signing key, not an Ed25519 encryption key, feeding it into `gen_shared_key` throws rather than just producing a wrong result.
+
+The practical workaround, used by every known working integration today, is an out-of-band map of known-good keys per network:
+
+```ts
+const GUARDIAN_NODE_PUBKEYS = {
+  "wss://staging.manas-rpc.palliora.org": "0x3b69e6c40864462682276fdbbad239a56f8c0d83a4d77a252df95bd6dff65dd0",
+};
+```
+
+This isn't a placeholder value, it's a real, currently-correct key for the staging network's guardian set, confirmed by a full working decrypt. There is currently no dynamic, public way to discover it yourself for a guardian you haven't already confirmed against. Treat this as a genuine open gap in the SDK, not something you're missing, if your integration needs to work across guardian sets you don't control, you'll need your own out-of-band key distribution until this is solved upstream.
+
+## Model availability and timeouts
+
+Guardians run a small, curated set of Ollama models, not an arbitrary one, see [Quickstart](/build/quickstart) for the confirmed-working list. Real inference can also take longer than you'd expect from a network transaction, give result polling a generous window (300 blocks is a safe starting point) rather than the SDK's 20-block default.

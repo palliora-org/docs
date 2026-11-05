@@ -1,0 +1,47 @@
+---
+title: "Overview"
+---
+
+Palliora DeFi has one role that people outside the core team can run: a Decom guardian. This section is for operators. It says what a guardian does, what it takes to run one, and how the guardians' shared key is made and kept.
+
+If you want to use the app or build with the SDK, go to [Overview](/defi) or [Build](/defi/build/build).
+
+## What a Decom guardian does
+
+A Decom guardian is a node that holds one share of a shared secret. Together, the guardians hold the secret `S` without any one of them knowing it. When the revoker asks to de-anonymize a transaction, each guardian checks the request. If it is valid, the guardian returns a partial decryption. A threshold of them must answer. On mainnet, the threshold is 7 of 10.
+
+A guardian cannot de-anonymize a transaction alone. It also needs the revoker's key. It does not weigh the reason for a request. It checks that the request is real, public and made by the registered revoker, and that the group is active. See [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+
+A guardian never sees the report. After the revoker de-anonymizes a transaction, it keeps a report on Palliora DA, sealed so that only the revoker, or any third party the revoker grants access to, can read it. That layer runs on Palliora's own Guardians, which are a different group. See [Palliora integration](/defi/learn/concepts/palliora-integration).
+
+## Who is who
+
+| Role           | Holds                                    | Does                                                                                   |
+| -------------- | ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| Decom guardian | One share of `S`, sealed on its own host | Answers valid requests with a partial decryption                                       |
+| Revoker        | A private key, `r`                       | Asks to de-anonymize a transaction. Combines the partial decryptions with its own key. |
+| Admin          | An allowlisted wallet                    | Starts a key ceremony. Never sees a share.                                             |
+| Pool owner     | The owner key                            | Registers the group and the revoker, and can deactivate a revoker group                |
+
+The current group size, threshold and request manager address are in [Network reference](/defi/reference/network-reference#disclosure-network).
+
+## What it takes
+
+* A host that is up all the time. A request needs 7 of 10 guardians to answer while the revoker waits.
+* Keys that only that node can read, kept in a secret store and never on disk in the clear.
+* Care with the ceremonies that change the group. See [Guardian key operations](/defi/participate/guardian-key-operations).
+
+To be added as a guardian, follow the process in the [guardian DKG guide](https://github.com/veilnyx/decom/blob/feat/guardian-dkg-vss/README_DKG_VSS.md).
+
+<CardGroup cols={2}>
+  <Card title="Run a Decom guardian" href="/defi/participate/run-a-decom-guardian">
+    Configure, secure and check a guardian node.
+  </Card>
+  <Card title="Guardian key operations" href="/defi/participate/guardian-key-operations">
+    How the shared key is made, refreshed, re-keyed and moved to a new group.
+  </Card>
+</CardGroup>
+
+## Next
+
+* [Run a Decom guardian](/defi/participate/run-a-decom-guardian)

@@ -1,0 +1,69 @@
+---
+title: "Overview"
+---
+
+Palliora DeFi (formerly Veilnyx) gives you three things to build with: an SDK that creates and proves private transactions, a pool contract that checks them, and an adaptor interface that lets a private transaction use another protocol.
+
+This section is for developers and for AI coding agents. If you only want to use the app, open it at [defi.palliora.org](https://defi.palliora.org).
+
+## What you can build
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" href="/defi/build/quickstart">
+    Create a shielded account, register, deposit, settle and withdraw with the SDK.
+  </Card>
+  <Card title="SDK reference" href="/defi/build/sdk-reference">
+    The packages, the `Core` class, the request types and the services you supply.
+  </Card>
+  <Card title="Integrate a DeFi protocol" href="/defi/build/integrate-a-protocol">
+    Write an adaptor so users can reach your protocol from a shielded balance.
+  </Card>
+  <Card title="Private Sub-accounts SDK" href="/defi/build/private-sub-accounts-sdk">
+    Derive Sub-accounts, fund them, buy return gas and bring the money back on HyperEVM.
+  </Card>
+  <Card title="Relayer API" href="/defi/build/relayer-api">
+    The HTTP interface of the HyperEVM relayer.
+  </Card>
+  <Card title="Troubleshooting" href="/defi/build/troubleshooting">
+    Errors from the SDK and the pool, and what causes them.
+  </Card>
+  <Card title="For agent-assisted developers" href="/defi/build/for-agent-assisted-devs">
+    Rules and entry points for coding agents working in this repo.
+  </Card>
+</CardGroup>
+
+## How the pieces fit
+
+| Piece              | What it is                                       | You use it to                                            |
+| ------------------ | ------------------------------------------------ | -------------------------------------------------------- |
+| SDK                | A set of TypeScript packages                     | Make keys, build, sign and prove transactions            |
+| Pool               | A contract on Ethereum and on HyperEVM           | Register, accept deposits, check and record transactions |
+| Verifiers          | Contracts that check proofs                      | Nothing directly. The pool calls them.                   |
+| Adaptor            | A small contract between the pool and a protocol | Let a private transaction swap, lend or stake            |
+| Bundler or relayer | A service that submits transactions              | Submit without exposing the user's wallet                |
+| Data source        | An index of notes and tree leaves                | Find a user's notes and build Merkle paths               |
+
+The SDK builds, signs and proves. It does not submit the transaction, and it does not ship a data source. You provide both. The [quickstart](/defi/build/quickstart) shows where each one plugs in.
+
+## Two ways to submit
+
+| Path    | Who submits                                     | What the public sees                 | Use it when                                        |
+| ------- | ----------------------------------------------- | ------------------------------------ | -------------------------------------------------- |
+| Wallet  | The user's own wallet calls `pool.transact`     | The user's wallet as the sender      | You test, or privacy of the sender does not matter |
+| Relayed | A bundler on Ethereum, or a relayer on HyperEVM | The relayer or bundler as the sender | You want the sender hidden                         |
+
+Deposits always use the wallet path, because the user's tokens move from their wallet. See [Relaying and gas](/defi/learn/concepts/relaying-and-gas) for how the fee works on each path.
+
+## Before you start
+
+* Read [How Palliora DeFi works](/defi/learn/how-it-works). It takes five minutes and the rest of this section assumes it.
+* You need Node.js, a wallet key for a test network, and the pool address for that network. Addresses live in [Network reference](/defi/reference/network-reference).
+* You need the circuit files (the `.wasm` and `.zkey` for each circuit). The prover loads them by path.
+
+## Package names
+
+The SDK packages are being renamed from `@veilnyx-sdk/*` to `@palliora.org/defi-*`. This section uses the new names. Until the rename ships, install the old names and change only the import paths. The mapping is in the [Rename map](/defi/reference/rename-map).
+
+## Next
+
+* [Quickstart](/defi/build/quickstart)

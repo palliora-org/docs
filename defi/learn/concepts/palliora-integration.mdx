@@ -1,0 +1,156 @@
+---
+title: "Palliora integration"
+---
+
+Palliora DeFi uses Palliora Core, Palliora's privacy engine, to keep what a revoker has de-anonymized. When a revoker decrypts a transaction, it can write the result to Palliora's Data Availability layer as an encrypted report. The report stays there, unaltered. The revoker, or any third party the revoker grants access to, can read it.
+
+This page explains what Palliora provides, what gets stored, and who can read it. For how a transaction is de-anonymized in the first place, read [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure).
+
+## Why store it on Palliora
+
+A decrypted transaction is sensitive, and a revoker needs to be able to prove later what it saw. Three things are hard to get from a database that one party runs:
+
+* **It must last.** The record has to stay available for as long as the transaction matters.
+* **It must not change.** Anyone who reads it later has to know it is the report that was written.
+* **Access must be controlled, and not by one party.** No single operator should be able to read or hand out the report.
+
+Palliora already provides these as part of its core design: Palliora Core is a persistent Data Availability layer, with a silent threshold encryption layer run by its network Guardians. A Compute Contract coordinates all of it: both storing the report and retrieving it, for the authorized actors. Palliora DeFi reuses them and builds nothing new for the purpose.
+
+## What Palliora provides
+
+| Palliora piece              | What it does for Palliora DeFi                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Data Availability           | Stores the report, keeps it available, and shows if it was altered.                                                                                          |
+| Silent threshold encryption | Encrypts the stored report to a group of Palliora Guardians. No single Guardian can decrypt it.                                                              |
+| Guardians                   | Hold the shares of that group's key. They take part when the revoker is granted access to read a report.                                                     |
+| Compute Contracts           | Record the report as a contract. The contract coordinates both storing the report and retrieving it, for the authorized actors, and handles grants and fees. |
+| PALI                        | Pays the network fees for publishing and for a grant.                                                                                                        |
+
+These are Palliora's own Guardians. They are not Decom guardians. A Decom guardian holds a share of the key that de-anonymizes a shielded transaction. A Palliora Guardian holds a share of the key that protects a stored report. The two groups have different jobs and different keys.
+
+The Palliora docs describe each piece in full. See [Learn more in the Palliora docs](#learn-more-in-the-palliora-docs).
+
+## How a report is published
+
+<Frame>
+  <img className="block dark:hidden" src="/images/palliora-report-flow-light.svg" alt="Seven steps from a de-anonymized transaction to a stored report, across the revoker's browser, Palliora Core and a reader. One: the revoker de-anonymizes a transaction with the Decom guardians. Two: the revoker seals a report to the reader's key, its own by default. Three: the revoker publishes the sealed report to Palliora as an encrypted contract, paid in PALI. Four: Data Availability and a Guardian group keep it. Five: later, the revoker requests a grant that names the receiving key. Six: the Guardians release the key, wrapped to that key. Seven: the reader opens the report and runs four checks. A third party the revoker grants access to reads it the same way, with its own key." />
+  <img className="hidden dark:block" src="/images/palliora-report-flow-dark.svg" alt="Seven steps from a de-anonymized transaction to a stored report, across the revoker's browser, Palliora Core and a reader. One: the revoker de-anonymizes a transaction with the Decom guardians. Two: the revoker seals a report to the reader's key, its own by default. Three: the revoker publishes the sealed report to Palliora as an encrypted contract, paid in PALI. Four: Data Availability and a Guardian group keep it. Five: later, the revoker requests a grant that names the receiving key. Six: the Guardians release the key, wrapped to that key. Seven: the reader opens the report and runs four checks. A third party the revoker grants access to reads it the same way, with its own key." />
+</Frame>
+
+1. **De-anonymize the transaction.** The revoker de-anonymizes one transaction with the Decom guardians, as described in [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure). The revoker's service returns the notes the transaction created and its sender.
+2. **Build the report.** The revoker's browser builds a report from that result. The report is bound to the request that de-anonymized the transaction.
+3. **Seal it.** The browser encrypts the report to a key that only the revoker's wallet can produce. The sealed bytes are all that leaves the browser.
+4. **Publish.** The browser publishes the sealed report to Palliora as an encrypted contract, and signs and pays for it with the revoker's own Palliora account. The Palliora SDK, also in the browser, encrypts it again to the Guardian group.
+5. **Record.** Palliora's Data Availability layer stores the contract. The report's place on it is the contract id, the block height and the extrinsic index, which the revoker can look up later.
+
+The Palliora DeFi server never holds a key and never sees the report. It only serves public data, such as the network settings and the index of published reports.
+
+## What the report holds
+
+| Field               | Meaning                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| Notes               | For each note the transaction created: asset, value, owner root address, blinding and leaf index. |
+| Refund data         | The sender's root address and the refund blinding, if the transaction has them.                   |
+| Linked transactions | Other transactions the revoker's service links to this one, if any.                               |
+| Request binding     | A hash of the request contract's network, its address and the request id.                         |
+| Salt                | 32 random bytes, so the public commitment to the report cannot be guessed.                        |
+
+The report is written as canonical JSON, so the same content always gives the same bytes.
+
+## What is public on Palliora and what is not
+
+| Public                                                                                                         | Hidden                                      |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| That a report exists for one transaction, named by the target network, the request id and the transaction hash | The report's content                        |
+| The public key the report is sealed to                                                                         | The key that opens it                       |
+| A commitment to the report: the Keccak-256 hash of its bytes                                                   | Which notes, amounts and addresses it names |
+| The Palliora account that published it                                                                         | Who is behind that account                  |
+
+The commitment does not leak the content, because the salt is random and the hash covers it.
+
+## Who can read a report
+
+**The revoker.** The revoker writes the report and owns it. By default the revoker is the reader.
+
+**A third party the revoker chooses.** The revoker can give someone else access, such as an auditor or a regulator. The revoker decides who, and no one else can add a reader. The grant goes through the same Compute Contract mechanism, and the report is sealed to the key of each reader the revoker grants.
+
+A reader gets the report back with an access grant, which is Palliora's Compute Contract mechanism for releasing a key:
+
+1. The revoker requests a grant on the stored contract. The request names the public key that may receive the decryption key, and pays the fee.
+2. Palliora Guardians cooperate, as a threshold, to rebuild the key that opens the stored data.
+3. The key comes back wrapped to the named public key, so only its holder can unwrap it.
+4. The holder uses it to open the stored data, then opens the inner seal with its own key. A third party does this with its own key, in the same way.
+
+Palliora does not choose the reader. The contract and the revoker's request do. A grant costs a network fee. The report's owner also sets a usage price, which a grant pays to the owner. The app refuses to pay an unexpectedly high price.
+
+## How a report is opened and checked
+
+When the revoker retrieves a report, the app does this in the browser. A granted third party follows the same steps with its own key.
+
+1. It finds the revoker's own report for the transaction. It accepts only one published by the revoker's own Palliora account.
+2. It requests an access grant and waits for the key.
+3. It unwraps the key and opens the stored data, then opens the inner seal with the revoker's report key.
+4. It checks four things, and shows the report only as verified when all pass:
+
+| Check                                                                | What it proves                             |
+| -------------------------------------------------------------------- | ------------------------------------------ |
+| The hash of the opened bytes equals the published commitment         | The report is the one that was written.    |
+| The report parses                                                    | It is a well-formed report.                |
+| The request binding matches this request                             | It belongs to this request, not another.   |
+| The request id, transaction hash and network match the artefact name | It describes the transaction it claims to. |
+
+## Two layers of protection
+
+The report is sealed twice.
+
+* **Inner seal.** The revoker's browser encrypts the report to the reader's key, which is the revoker's own key by default, with X25519 key agreement, HKDF and ChaCha20-Poly1305. The request binding is part of what is authenticated, so a sealed report cannot be replayed against another request.
+* **Outer layer.** Palliora's silent threshold encryption layer encrypts the sealed bytes to its Guardian group, and the contract controls who gets the key.
+
+Neither seal is enough on its own today. The outer layer's guarantees come from Palliora's rules, and under those rules as they stand it does not keep the report confidential by itself. The inner seal does not give durability, tamper evidence or controlled access. Together they do.
+
+## Keys and accounts
+
+The revoker's wallet unlocks two things, once per page session. Nothing is saved.
+
+| What               | Derived from                                                   | Used for                                                                                                          |
+| ------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| A Palliora account | A wallet signature over the plain message `sign`               | Signing and paying for Palliora transactions. The same wallet gives the same account as in the Palliora explorer. |
+| A report key       | A wallet signature over a message that names the site's origin | Sealing and opening reports.                                                                                      |
+
+The report key depends on the site's origin. A report only opens from the origin it was sealed under.
+
+The Palliora account needs PALI to publish and to request a grant. The app shows the address and the amount, and stops if the balance is too low. Fees and prices are in [Fees](/defi/reference/fees).
+
+## What Palliora does not do
+
+* It does not decide who may de-anonymize a shielded transaction. The revoker and the Decom guardians do. Palliora only keeps the result.
+* It does not change what the public sees on the pool. Publishing a report adds a record on Palliora and changes nothing on the pool.
+* It does not read the report. No Palliora Guardian, and no Palliora DeFi server, holds the key and the data together.
+
+## For builders
+
+The app uses `@palliora.org/chainsdk` for the Palliora side.
+
+| Task                          | SDK call                                                   |
+| ----------------------------- | ---------------------------------------------------------- |
+| Derive the Palliora account   | `createAccount(signature, AccountSourceType.DERIVED, ...)` |
+| Encrypt to the Guardian group | `encryptToGuardianGroup`                                   |
+| Publish the report contract   | `createAgreement`                                          |
+| Request an access grant       | `accessContract`                                           |
+
+A report's artefact name is `veilnyx-deanon/v1/<target network id>/<request id>/<transaction hash>`. The name keeps its original prefix, as it is part of the stored record.
+
+## Learn more in the Palliora docs
+
+The Palliora docs describe the pieces this page uses:
+
+* [Data Availability](/learn/concepts/data-availability)
+* [Threshold Encryption](/learn/concepts/threshold-encryption)
+* [Guardian](/learn/concepts/guardian)
+* [Compute Contracts](/learn/concepts/compute-contracts)
+* [Accountable Privacy](/learn/concepts/accountable-privacy)
+
+## Next
+
+* [Accountable privacy and disclosure](/defi/learn/concepts/accountable-privacy-and-disclosure)
+* [Privacy model](/defi/learn/concepts/privacy-model)

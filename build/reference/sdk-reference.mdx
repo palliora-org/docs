@@ -1,0 +1,190 @@
+---
+title: "SDK Reference"
+---
+
+`@palliora.org/chainsdk` wraps Palliora's network calls: account and keyring helpers, guardian coordination, data availability, compute agreements, staking, and token transfers. This page organizes its actual exported surface by area. For the full picture of any one call's behavior, the package's own README and source are the final word, this page is a map, not a replacement for reading the code when something matters.
+
+## Install and configure
+
+```bash
+npm install @palliora.org/chainsdk
+```
+
+Call `init()` once, before anything else, and pass every value your app needs. The SDK reads no environment variables on its own:
+
+```ts
+import { init } from "@palliora.org/chainsdk";
+
+init({
+  pallioraWs: "wss://staging.manas-rpc.palliora.org",
+  debug: true,
+});
+```
+
+| Option               | Required                                 | Purpose                                                                   |
+| -------------------- | ---------------------------------------- | ------------------------------------------------------------------------- |
+| `pallioraWs`         | yes                                      | WebSocket endpoint for the network connection                             |
+| `pallioraRpcUrl`     | no                                       | RPC endpoint, when it differs from `pallioraWs`                           |
+| `costEstimatorUrl`   | only if you call cost-estimation helpers | Base URL of the cost-estimation service                                   |
+| `authServiceUrl`     | only if you touch artifact storage       | Base URL of the auth service issuing S3 pre-signed URLs                   |
+| `awsRegion`          | only with artifact storage               | AWS region of the artifact storage bucket                                 |
+| `awsS3Bucket`        | only with artifact storage               | Artifact storage bucket name                                              |
+| `debug`              | no, default `false`                      | Enables debug logging in wrapper helpers                                  |
+| `txWaitFinalization` | no, default `false`                      | Wait for finalization instead of returning once a transaction is in-block |
+
+Required options are checked lazily: an app that never touches artifact storage doesn't need the AWS options, but reading one that was never set always throws rather than silently falling back. `init()` merges on repeat calls, so you can supply configuration in stages.
+
+### Testnet endpoint
+
+`wss://staging.manas-rpc.palliora.org` is the endpoint used throughout these docs and confirmed working end to end, guardian coordination, threshold decryption, and real inference all tested against it. The SDK's own default points at `wss://manas-rpc.palliora.org` (no `staging.` prefix), which has not been independently confirmed for the full guardian/compute flow, use the staging endpoint explicitly unless you have reason to believe otherwise.
+
+## Accounts and keyring
+
+```ts
+import { getApi, getKeyring, getEncKeyring } from "@palliora.org/chainsdk";
+
+const api = await getApi();          // shared ApiPromise singleton
+const keyring = await getKeyring();  // shared sr25519 keyring, for signing
+const encKeyring = await getEncKeyring(); // shared ed25519 keyring, for encrypted-result recipient keys
+```
+
+Both keyrings auto-add a dev-only `//Bob` account so scripts run without setup. Never use it for real funds. Add your own signer for anything real: `keyring.addFromUri("//Alice")`, `keyring.addFromUri(mnemonic)`, or:
+
+```ts
+import { createAccount, AccountSourceType } from "@palliora.org/chainsdk";
+
+await createAccount(mnemonicOrKeyOrSeed, AccountSourceType.MNEMONIC);
+// also: PRIVATE_KEY | SEED | ADDRESS | DERIVED
+```
+
+## Token amounts
+
+PALI has 18 decimals. Always convert to atomic units before sending a network amount:
+
+```ts
+import { tokenToBigint, fromAtomicPaliAmount, formatPaliAmount, fetchTokenProperties } from "@palliora.org/chainsdk";
+
+const amount = tokenToBigint("100");  // "100" or 100 -> bigint atomic units
+fromAtomicPaliAmount(amount);         // -> "100" (string)
+formatPaliAmount(amount);             // -> "100 PALI"
+const { symbol, decimals } = await fetchTokenProperties(); // cached after first call
+```
+
+## Guardians
+
+```ts
+import { getGuardianList, getGuardianAddress, createGuardianGroup, joinGuardian } from "@palliora.org/chainsdk";
+
+const peerIds = await getGuardianList();       // raw guardian peer IDs
+const guardians = await getGuardianAddress();  // [{ peerid, address }, ...]
+
+await joinGuardian(account, {
+  standard: true,
+  verifier: true,
+  compute: "trusted,tee", // comma list: trusted | tee | mpc | fhe | zkp
+});
+```
+
+For threshold-encrypted flows (see [Encrypted Compute](/build/guides/encrypted-compute)) you need a guardian group of exactly three Guardians and its derived crypto parameters:
+
+```ts
+import { createGuardianGroupAndWatch } from "@palliora.org/chainsdk";
+
+const selected = guardians.slice(0, 3).map((g) => g.address);
+const groupInfo = await createGuardianGroupAndWatch(account, selected, 20);
+// { groupId, groupPk, tauParams, aggKey, guardians }
+```
+
+## Data availability
+
+```ts
+import { submitData } from "@palliora.org/chainsdk";
+
+await submitData(account, "payload to store on Palliora DA");
+```
+
+For threshold-encrypted submission, `submitTEDataWithCipher` plus `registerDataAgreement`, see [Store data](/build/guides/store-data).
+
+## Compute
+
+```ts
+import { createAgreement, estimateMinFee, buildFee, fromAtomicPaliAmount, getGuardianList } from "@palliora.org/chainsdk";
+
+const selected = (await getGuardianList()).slice(0, 3);
+const { minFee } = await estimateMinFee({ computeRate: "0.000000001" });
+
+const result = await createAgreement(
+  {
+    contractType: "Active",
+    guardians: selected,
+    compute: {
+      cipher: "Plaintext",
+      computerIndices: selected.map((_, i) => i),
+      ...buildFee({ amount: fromAtomicPaliAmount(minFee), computeRate: "0.000000001" }),
+      deadline: 0,
+      confidentiality: { Trusted: 0 },
+      feeFunction: null,
+      input: { Inline: { data: [...new TextEncoder().encode("hello")] } },
+      program: { NativeExecute: "Inference" },
+    },
+    resultCipher: "Plaintext",
+  },
+  account,
+);
+// -> { blockNumber, index, hash, agreementId? }
+```
+
+`createAgreement(contract, account, oracleQuoteId?)` is the low-level call everything else wraps. `estimateMinFee({ computeRate, inputContractId? })` returns the fee floor the network enforces; `getFeeParams()` returns the live network parameters it derives from. See [Fees and Incentives](/learn/concepts/fees-and-incentives) for what those parameters mean.
+
+Ready-made helpers for common cases:
+
+| Function                                                                         | Use case                                                     | Encryption                    |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------- |
+| `inferenceCompute(params, account)`                                              | Inline LLM inference, `Active` contract                      | Plaintext                     |
+| `simpleCompute(params, account)`                                                 | Run a program from a URL against a previously recorded input | Plaintext                     |
+| `dataContract(params, account)`                                                  | `Dormant` contract fetching input from a URL                 | Plaintext                     |
+| `encryptedInferenceSubscription` / `...Invocation` / `encryptedInferenceCompute` | Register once, invoke repeatedly, threshold-encrypted input  | Threshold (`ThresholdHybrid`) |
+
+For anything these don't cover, build the `ComputeContract` object yourself and call `createAgreement` directly.
+
+### Getting the result
+
+Compute results land later as a `compute.result` extrinsic, not as the return value of the submit call. Poll with `scanForBlockEvent` matching your agreement's ID:
+
+```ts
+import { scanForBlockEvent, fetchAndDecodeExtrinsic, watchForSubmissionReceipt } from "@palliora.org/chainsdk";
+```
+
+See [Quickstart](/build/quickstart) for the full working pattern. `watchForSubmissionReceipt(requestId, timeoutMs?)` does the same scan internally and resolves `{ extrinsicHash, blockHeight, extrinsicIndex }`, simpler when you just need proof of settlement, not the decoded content.
+
+## Staking
+
+```ts
+import { newStake, addStake, reduceStake, removeStake, withdrawStake, payoutStake, tokenToBigint } from "@palliora.org/chainsdk";
+
+await newStake(account, tokenToBigint(100), "Staked");
+await addStake(account, tokenToBigint(25));
+await reduceStake(account, tokenToBigint(10));
+await removeStake(account);
+await withdrawStake(account);
+await payoutStake(account, [123, 124]); // era numbers
+```
+
+## Token transfers
+
+```ts
+import { fundAccount, transfer, tokenToBigint } from "@palliora.org/chainsdk";
+
+await fundAccount(account, tokenToBigint(50));
+await transfer(account, tokenToBigint(10), destinationAddress);
+```
+
+`fundAccount`'s signer is always the keyring's first (dev) pair, the `account` argument is the recipient, not the signer.
+
+## Other useful exports
+
+* `signAndSend(tx, account, opts?)`, the low-level submit helper everything funnels through.
+* `getGuardianAddress()`, `setIdentity(account, { display })`, `joinValidator(account, commission)`.
+* `hexToUint8Array(hex)`, `decodeField(base64, expectedLength?)`, `generateRandomBytes(length?)`.
+* Crypto helpers (`gen_shared_key`, `gen_stretched_key`, `encrypt`, `decrypt`) for hybrid-encryption and threshold-encryption-adjacent work, see [Encrypted Compute](/build/guides/encrypted-compute) for how these fit together.
+* An indexer client (`src/indexer/`) with typed read-only wrappers for blocks, contracts, artifacts, extrinsics, transfers, and guardians, see [Compute Artifacts: publish and run](/build/guides/compute-artifacts) for the artifact-discovery calls.
