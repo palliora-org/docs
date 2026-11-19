@@ -9,38 +9,172 @@
 # Guardians must reach the bootnode over BOOTNODE_MULTIADDR, and the compute
 # sidecars must reach a *guardian* RPC over GUARDIAN_RPC_WS — a validator
 # answers guardian.guardianList with an empty list.
+#
+# Security baseline (docs/SECURITY-DEPLOYMENT.md):
+#   * every image is pinned by digest; Palliora's own images have no default
+#     and must be set in .env as repo@sha256:<digest>
+#   * every node container runs as an unprivileged uid with no capabilities
+#     and sees only its own base path and its own keystore
+#   * nothing that holds the Docker socket, and no datastore, is published
+#     beyond loopback
+#   * one-shot preflight-* services refuse to start a stack whose .env still
+#     carries .env.example placeholders or well-known public keys
+#
+# Compose interpolates the whole file before it applies profiles, so only
+# values every machine needs use ${VAR:?}. Role-specific secrets are checked
+# by the preflight service of that role instead, so a CPU box need not invent
+# placeholder compute secrets.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared fragments
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Flags every node shares. Per-node flags (role, ports, base path, pruning)
-# come from each service's `command`, which Docker appends to this entrypoint.
+# Rejects placeholder and well-known values before anything that would use
+# them starts. Reads the variable NAMES to check from DIGEST_VARS,
+# REQUIRED_VARS and OPTIONAL_VARS; each service passes the values themselves.
+# ($$ is a literal $ for compose.)
+x-preflight: &preflight
+  image: ${PREFLIGHT_IMAGE:-busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4}
+  restart: "no"
+  network_mode: none
+  user: "65534:65534"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  entrypoint: ["/bin/sh", "-c"]
+  command:
+    - |
+      fail=0
+      bad() { echo "preflight: $$*" >&2; fail=1; }
+      get() { eval "printf '%s' \"\$${$$1:-}\""; }
+      placeholder() {
+        case "$$2" in
+          *CHANGE_ME*|*change_me*|*changeme*|*EXAMPLE*|*'<'*|*'>'*|x.x.x.x)
+            bad "$$1 still holds the .env.example placeholder ($$2)";;
+        esac
+      }
+      for v in $$DIGEST_VARS; do
+        val=$$(get "$$v")
+        case "$$val" in
+          *@sha256:*)
+            d=$${val##*@sha256:}
+            if [ $${#d} -ne 64 ] || [ -n "$$(printf '%s' "$$d" | tr -d '0-9a-f')" ]; then
+              bad "$$v has a malformed digest: '$$val'"
+            fi;;
+          *) bad "$$v must be an image pinned by digest (repo@sha256:<64 hex>), got '$$val'";;
+        esac
+      done
+      for v in $$REQUIRED_VARS; do
+        val=$$(get "$$v")
+        if [ -z "$$val" ]; then bad "$$v is not set in .env"; else placeholder "$$v" "$$val"; fi
+      done
+      for v in $$OPTIONAL_VARS; do
+        val=$$(get "$$v")
+        [ -z "$$val" ] || placeholder "$$v" "$$val"
+      done
+      # Signing seed: reject trivial seeds (0x00..01 and friends), dev
+      # derivation paths, the Substrate dev mnemonic and the Hardhat keys.
+      if [ -n "$${PRIVATE_KEY+x}" ] && [ -n "$$PRIVATE_KEY" ]; then
+        k=$$(printf '%s' "$$PRIVATE_KEY" | sed 's/^0[xX]//' | tr 'A-F' 'a-f')
+        case "$$k" in
+          *[!0-9a-f]*) ;;
+          *) t=$$(printf '%s' "$$k" | sed 's/^0*//')
+             [ $${#t} -ge 16 ] || bad "PRIVATE_KEY is a trivially guessable seed";;
+        esac
+        case "$$k" in
+          *//alice*|*//bob*|*//charlie*|*//dave*|*//eve*|*//ferdie*|*//Alice*|*//Bob*|*//Charlie*|*//Dave*|*//Eve*|*//Ferdie*|\
+          *"bottom drive obey lake curtain smoke basket hold race lonely fit walk"*|\
+          ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80|\
+          59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d)
+            bad "PRIVATE_KEY is a publicly known development key";;
+        esac
+      fi
+      # Result submitter: not one of the public Substrate dev accounts.
+      case "$${SUBMITTER_ACCOUNT_ID:-}" in
+        5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY|5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty|\
+        5FLSigC9HGRKVhB9FiEo4Y3koPsNmBmLJbpXg2mp1hXcS59Y|5DAAnrj7VHTznn2AWBemMuyBwZWs6FNFjdyVXUeYum3PTXFy|\
+        5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68kUMaw|5CiPPseXPECbkjWCa6MnjNokrgYjMqmKndv2rSnekmSK2DjL)
+          bad "SUBMITTER_ACCOUNT_ID is a public development account (Alice..Ferdie)";;
+      esac
+      # Optional result key: if set, 64 bytes of hex and not all zeros.
+      if [ -n "$${STATIC_RESPONSE_KEY:-}" ]; then
+        k=$$(printf '%s' "$$STATIC_RESPONSE_KEY" | sed 's/^0[xX]//' | tr 'A-F' 'a-f')
+        if [ $${#k} -ne 128 ] || [ -n "$$(printf '%s' "$$k" | tr -d '0-9a-f')" ]; then
+          bad "STATIC_RESPONSE_KEY must be 64 bytes of hex, or empty"
+        elif [ -z "$$(printf '%s' "$$k" | tr -d 0)" ]; then
+          bad "STATIC_RESPONSE_KEY is all zeros"
+        fi
+      fi
+      if [ -n "$${ORCHESTRATOR_AUTH_TOKEN+x}" ] && [ $${#ORCHESTRATOR_AUTH_TOKEN} -lt 32 ]; then
+        bad "ORCHESTRATOR_AUTH_TOKEN must be at least 32 characters (openssl rand -hex 32)"
+      fi
+      if [ "$$fail" -ne 0 ]; then
+        echo "preflight: refusing to start; fix .env (see dockerfiles/.env.example)" >&2
+        exit 1
+      fi
+      echo "preflight: ok"
+
+# Flags every node shares. Per-node flags (role, ports, pruning) come from each
+# service's `command`, which Docker appends to this entrypoint. Each node sees
+# only its own base path (/data) and its own keystore (/keys), so a compromise
+# of one node container does not hand over the other nodes' keys.
 x-node: &node
-  image: ${NODE_IMAGE:-public.ecr.aws/palliora/palliora/node:rc5}
+  image: ${NODE_IMAGE:?set NODE_IMAGE in .env to an image pinned by digest (repo@sha256:...)}
   network_mode: host
   restart: always
-  volumes:
-    - /etc/timezone:/etc/timezone:ro
-    - /etc/localtime:/etc/localtime:ro
-    - ${CHAIN_SPEC:-./palliora-manas.json}:/root/palliora-manas.json:ro
-    - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}:/root/palliora-data
-    - ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}:/root/keystores:ro
+  # Unprivileged and capability-free. Host directories mounted below must be
+  # owned by this uid (sudo chown -R 10000:10000 <dir>); a root-owned data dir
+  # left from an older deployment fails with "Permission denied".
+  user: "${NODE_UID:-10000}:${NODE_GID:-10000}"
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  depends_on:
+    preflight-node:
+      condition: service_completed_successfully
   entrypoint:
     - /usr/local/bin/palliora-node
-    - --chain=/root/palliora-manas.json
+    - --chain=/etc/palliora/palliora-manas.json
+    - --base-path=/data
     - --bootnodes=${BOOTNODE_MULTIADDR:?set BOOTNODE_MULTIADDR in .env}
-    - --rpc-cors=all
+    # Browser origins allowed to call RPC. Non-browser clients (the sidecars,
+    # palliora-cli, the SDK under node) are not subject to CORS.
+    - --rpc-cors=${RPC_CORS:-http://localhost,http://127.0.0.1,https://localhost,https://127.0.0.1}
+    # Listens on every interface so the bridge-network sidecars can reach it,
+    # but serves *safe* methods only: no node sets --rpc-methods here, so the
+    # default (Auto) applies, which is Safe on a non-loopback address. Keystore,
+    # author_rotateKeys and offchain-storage writes are therefore not callable
+    # remotely. (Not set explicitly to Safe: a second --rpc-methods in a
+    # service's command would then be rejected, and SPLIT-DEPLOYMENT.md step 8
+    # adds one for the rare one-off unsafe call.)
     - --unsafe-rpc-external
     - --no-telemetry
     - --no-mdns
-    # Allows non-global addresses in the DHT, so the two machines find each
-    # other over their private subnet. Currently redundant — the spec's
-    # chainType is Development, which already enables this and private-IP
-    # dialling — but load-bearing the moment that becomes Live.
+    # Allow non-global addresses in the DHT (--discover-local) and dialling
+    # them (--allow-private-ip), so the machines find and reach each other
+    # over their private VPC subnet and the CPU box's validators reach each
+    # other on 127.0.0.1. The Manas spec's chainType is Live (LOW-01), under
+    # which Substrate defaults both to off; without these the boxes stop
+    # peering over private IPs.
     - --discover-local
+    - --allow-private-ip
     - --in-peers=${NODE_IN_PEERS:-100}
     - --out-peers=${NODE_OUT_PEERS:-100}
+
+# Mounts every node shares. Each service lists these plus its own data dir and
+# keystore (YAML merge keys do not concatenate lists).
+x-node-mounts:
+  - &mount-timezone /etc/timezone:/etc/timezone:ro
+  - &mount-localtime /etc/localtime:/etc/localtime:ro
+  - &mount-chain-spec ${CHAIN_SPEC:-./palliora-manas.json}:/etc/palliora/palliora-manas.json:ro
+
+# Liveness: the RPC server answers GET /health with system_health. Each node
+# names its own --rpc-port in `test`. The long start period covers genesis
+# import, during which RPC is not yet bound.
+x-node-healthcheck: &node-healthcheck
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 5m
 
 # Every node also passes --public-addr=/ip4/${PUBLIC_IP}/tcp/<its port>, so the
 # DHT carries an address nodes on other networks can dial; otherwise a node
@@ -49,6 +183,29 @@ x-node: &node
 # address verbatim, so each service supplies its own port, plus /ws on
 # non-validators, which listen on WebSocket. An unset PUBLIC_IP makes the node
 # refuse to start with "invalid value '/ip4/PUBLIC_IP-not-set/...'".
+#
+# Nodes listen with --listen-addr=/ip4/${LISTEN_IP}/... rather than --port,
+# which also binds /ip6/::. On a Docker host that wildcard expands to one fe80::
+# link-local address per veth and bridge, and every one of them is published
+# to the DHT; the lists grow past what peers can use, and Kademlia FIND_NODE
+# replies stop arriving. --listen-addr conflicts with --port, so each service
+# names its port here, with /ws on the same nodes that advertise /ws.
+#
+# LISTEN_IP defaults to 0.0.0.0, which still publishes every IPv4 interface,
+# Docker bridges included. Set it to the host's VPC address to publish only
+# that and PUBLIC_IP.
+#
+# Keystores: KEYSTORE_ROOT holds one directory per account (account1..7), each
+# with a keystore/ inside. A host should hold ONLY the accounts its own nodes
+# use (1-3 on the CPU box, 4-7 on the GPU box). Each node mounts its own
+# account directory read-only at /keys and reads /keys/keystore:
+#   * account directory missing on the host -> compose refuses to create the
+#     container ("bind source path does not exist"), because
+#     create_host_path is false;
+#   * keystore/ missing inside it -> the node exits with
+#     Keystore(Io(Os { code: 30, kind: ReadOnlyFilesystem })).
+# Both are deliberate: without the :ro the node would create an empty
+# keystore, start cleanly with zero keys and silently never author or sign.
 
 # Offchain endpoints the guardian binary reads (guardian/src/api/).
 #   TRAINING_HOST -> POST /create-groups   (training-server)
@@ -68,7 +225,54 @@ x-host-gateway: &host-gateway
 services:
 
   # ───────────────────────────────────────────────────────────────────────────
+  # Preflight checks — one-shot, no network. Each runs before the services of
+  # its role and exits non-zero (blocking them) on a bad .env.
+  # ───────────────────────────────────────────────────────────────────────────
+
+  preflight-node:
+    <<: *preflight
+    profiles: [validator, guardian, operator, extras]
+    environment:
+      DIGEST_VARS: NODE_IMAGE
+      REQUIRED_VARS: NODE_IMAGE BOOTNODE_MULTIADDR
+      OPTIONAL_VARS: PUBLIC_IP
+      NODE_IMAGE: ${NODE_IMAGE:-}
+      BOOTNODE_MULTIADDR: ${BOOTNODE_MULTIADDR:-}
+      PUBLIC_IP: ${PUBLIC_IP:-}
+
+  preflight-compute:
+    <<: *preflight
+    profiles: [compute, operator]
+    environment:
+      DIGEST_VARS: COMPUTE_IMAGE TRAINING_IMAGE ESTIMATION_IMAGE REDIS_IMAGE
+      REQUIRED_VARS: SUBMITTER_ACCOUNT_ID PRIVATE_KEY ORCHESTRATOR_AUTH_TOKEN
+      OPTIONAL_VARS: STATIC_RESPONSE_KEY
+      COMPUTE_IMAGE: ${COMPUTE_IMAGE:-}
+      TRAINING_IMAGE: ${TRAINING_IMAGE:-}
+      ESTIMATION_IMAGE: ${ESTIMATION_IMAGE:-}
+      REDIS_IMAGE: ${REDIS_IMAGE:-redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537}
+      SUBMITTER_ACCOUNT_ID: ${SUBMITTER_ACCOUNT_ID:-}
+      PRIVATE_KEY: ${PRIVATE_KEY:-}
+      STATIC_RESPONSE_KEY: ${STATIC_RESPONSE_KEY:-}
+      ORCHESTRATOR_AUTH_TOKEN: ${ORCHESTRATOR_AUTH_TOKEN:-}
+
+  preflight-s3auth:
+    <<: *preflight
+    profiles: [s3auth]
+    environment:
+      DIGEST_VARS: S3_AUTH_IMAGE
+      REQUIRED_VARS: AWS_REGION AWS_S3_BUCKET
+      S3_AUTH_IMAGE: ${S3_AUTH_IMAGE:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Validators — CPU-only machine. validator1 is the bootnode.
+  #
+  # No --force-authoring (PAL-35): with three GRANDPA voters, a partitioned
+  # validator that force-authors grows an unfinalised fork. Authoring waits
+  # for peers instead. Only a single-node dev chain needs the flag; add it on
+  # such a chain by hand, never on Manas.
   # ───────────────────────────────────────────────────────────────────────────
 
   validator1:
@@ -76,17 +280,28 @@ services:
     profiles: [validator]
     environment:
       RUST_LOG: ${VALIDATOR_RUST_LOG:-sync=debug,db=debug,sub-libp2p=debug,dac_guardian=trace}
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/validator1:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}/account1
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9944/health"]
     command:
       - --validator
-      - --force-authoring
       # Runs the guardian protocol so that guardian.guardianList is served on
       # :9944 — the peer set behind that RPC is only populated on a node
       # running it. Deliberately gets no compute endpoints: this node answers
       # the list, it does not execute jobs.
       - --guardian
-      - --base-path=/root/palliora-data/validator1
-      - --keystore-path=/root/keystores/account1/keystore
-      - --port=30333
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30333
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30333
       - --rpc-port=9944
       - --blocks-pruning=archive
@@ -97,15 +312,25 @@ services:
     profiles: [validator]
     environment:
       RUST_LOG: ${VALIDATOR_RUST_LOG:-sync=debug,db=debug,sub-libp2p=debug,dac_guardian=trace}
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/validator2:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}/account2
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9945/health"]
     command:
       - --validator
-      - --force-authoring
-      - --base-path=/root/palliora-data/validator2
-      - --keystore-path=/root/keystores/account2/keystore
-      - --port=30334
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30334
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30334
       - --rpc-port=9945
-      - --rpc-methods=Unsafe
       - --blocks-pruning=${VALIDATOR_PRUNING:-2560}
       - --state-pruning=${VALIDATOR_PRUNING:-2560}
 
@@ -114,12 +339,23 @@ services:
     profiles: [validator]
     environment:
       RUST_LOG: ${VALIDATOR_RUST_LOG:-sync=debug,db=debug,sub-libp2p=debug,dac_guardian=trace}
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/validator3:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}/account3
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9946/health"]
     command:
       - --validator
-      - --force-authoring
-      - --base-path=/root/palliora-data/validator3
-      - --keystore-path=/root/keystores/account3/keystore
-      - --port=30335
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30335
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30335
       - --rpc-port=9946
       - --blocks-pruning=${VALIDATOR_PRUNING:-2560}
@@ -134,14 +370,25 @@ services:
     <<: *node
     profiles: [guardian]
     environment: *guardian-env
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/guardian1:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}/account4
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9947/health"]
     command:
       - --guardian
-      - --base-path=/root/palliora-data/guardian1
-      - --keystore-path=/root/keystores/account4/keystore
-      - --port=30336
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30336/ws
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30336/ws
       - --rpc-port=9947
-      - --rpc-methods=Unsafe
       - --blocks-pruning=archive
       - --state-pruning=archive
 
@@ -149,14 +396,25 @@ services:
     <<: *node
     profiles: [guardian]
     environment: *guardian-env
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/guardian2:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}/account5
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9948/health"]
     command:
       - --guardian
-      - --base-path=/root/palliora-data/guardian2
-      - --keystore-path=/root/keystores/account5/keystore
-      - --port=30337
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30337/ws
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30337/ws
       - --rpc-port=9948
-      - --rpc-methods=Unsafe
       - --blocks-pruning=${GUARDIAN_PRUNING:-2560}
       - --state-pruning=${GUARDIAN_PRUNING:-2560}
 
@@ -164,14 +422,25 @@ services:
     <<: *node
     profiles: [guardian]
     environment: *guardian-env
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/guardian3:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}/account6
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9949/health"]
     command:
       - --guardian
-      - --base-path=/root/palliora-data/guardian3
-      - --keystore-path=/root/keystores/account6/keystore
-      - --port=30338
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30338/ws
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30338/ws
       - --rpc-port=9949
-      - --rpc-methods=Unsafe
       - --blocks-pruning=${GUARDIAN_PRUNING:-2560}
       - --state-pruning=${GUARDIAN_PRUNING:-2560}
 
@@ -179,14 +448,25 @@ services:
     <<: *node
     profiles: [guardian]
     environment: *guardian-env
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/guardian4:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}/account7
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9950/health"]
     command:
       - --guardian
-      - --base-path=/root/palliora-data/guardian4
-      - --keystore-path=/root/keystores/account7/keystore
-      - --port=30339
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30339/ws
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/30339/ws
       - --rpc-port=9950
-      - --rpc-methods=Unsafe
       - --blocks-pruning=${GUARDIAN_PRUNING:-2560}
       - --state-pruning=${GUARDIAN_PRUNING:-2560}
 
@@ -200,15 +480,22 @@ services:
   # `operator` profile too, so one value brings up a whole working stack.
   #
   # Same shape as guardian1, with one difference that matters: it is bound to
-  # no pre-provisioned account. Point KEYSTORE_ROOT at your own directory and
-  # OPERATOR_KEYSTORE_PATH at the keystore inside it — see .env.example for
-  # the layout, and keep the :ro, which is what turns a wrong path into a
-  # crash instead of a node that runs with zero keys and never signs.
+  # no pre-provisioned account. KEYSTORE_ROOT is YOUR key directory, holding
+  # keystore/ directly (KEYSTORE_ROOT=/home/ubuntu/my-guardian ->
+  # /home/ubuntu/my-guardian/keystore/<key files>). It is mounted read-only at
+  # /keys, like every other node's account directory.
   #
   # Archive by default, like guardian1: this is the only node the sidecars
   # can query, and a pruned one answers lookups for an older block as though
   # the data had never existed. Set OPERATOR_PRUNING=2560 to trade that for
   # disk.
+  #
+  # Warp sync is opt-in: OPERATOR_SYNC=warp with a numeric
+  # OPERATOR_STATE_PRUNING (the node refuses warp on archive state). It
+  # reaches the head in seconds but holds no blocks before the warp point,
+  # so the sidecars cannot look up older blocks. It only takes effect on an
+  # empty base path, and the state pruning mode cannot change once the
+  # database exists.
   #
   # PUBLIC_IP is the address other guardians dial. Without it the node
   # reaches the bootnode and syncs, but no guardian ever connects to it.
@@ -217,40 +504,80 @@ services:
   # peers: n normally while guardian.guardianList never names it, and it is
   # given no work until it joins on chain — see palliora-cli join-guardian.
   #
-  # Inherits --unsafe-rpc-external and --rpc-cors=all from x-node, so
-  # OPERATOR_RPC_PORT is served to every address the host permits. Firewall
-  # it to this box: the sidecars reach it over host.docker.internal, so
-  # nothing here needs it published.
+  # Inherits --unsafe-rpc-external from x-node, so OPERATOR_RPC_PORT (safe
+  # methods only) is served to every address the host permits. Firewall it to
+  # this box: the sidecars reach it over host.docker.internal, so nothing here
+  # needs it published.
   guardian-operator:
     <<: *node
     profiles: [operator]
     environment: *guardian-env
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/guardian-operator:/data
+      - type: bind
+        source: ${KEYSTORE_ROOT:-/home/ubuntu/palliora-keystores}
+        target: /keys
+        read_only: true
+        bind: {create_host_path: false}
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:${OPERATOR_RPC_PORT:-9947}/health"]
     command:
       - --guardian
-      - --base-path=/root/palliora-data/guardian-operator
-      - --keystore-path=${OPERATOR_KEYSTORE_PATH:-/root/keystores/keystore}
-      - --port=${OPERATOR_P2P_PORT:-30336}
+      - --keystore-path=/keys/keystore
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/${OPERATOR_P2P_PORT:-30336}/ws
       - --public-addr=/ip4/${PUBLIC_IP:-PUBLIC_IP-not-set}/tcp/${OPERATOR_P2P_PORT:-30336}/ws
       - --rpc-port=${OPERATOR_RPC_PORT:-9947}
       - --blocks-pruning=${OPERATOR_PRUNING:-archive}
-      - --state-pruning=${OPERATOR_PRUNING:-archive}
+      - --state-pruning=${OPERATOR_STATE_PRUNING:-${OPERATOR_PRUNING:-archive}}
+      - --sync=${OPERATOR_SYNC:-full}
 
   # ───────────────────────────────────────────────────────────────────────────
   # Compute sidecars — GPU machine, alongside the guardians.
   # Bridge network: they reach the host-network guardians, and the host Ollama
   # process holding the GPU, via host.docker.internal; each other by name.
+  #
+  # Their images are built outside this repository and have no default here:
+  # set COMPUTE_IMAGE, TRAINING_IMAGE and ESTIMATION_IMAGE to digests of
+  # images rebuilt after the 2026-10-31 incident (the old tags may have been
+  # replaced). Unset, the pull fails on the placeholder name, and
+  # preflight-compute rejects anything not pinned by digest.
+  #
+  # With IMDSv2 hop limit 1 (docs/SECURITY-DEPLOYMENT.md) these bridge-network
+  # containers, and the job containers the orchestrator spawns, cannot reach
+  # the instance's role credentials.
   # ───────────────────────────────────────────────────────────────────────────
 
   # Serves COMPUTE_HOST (/compute) and POST /rate-quote. Spawns the result
   # relay on 4040 and the docker-gateway on its socket; Redis is in the image.
+  #
+  # Holds the Docker socket (root on this host) and the relay's signing key,
+  # so its ports are published on loopback only: Docker's own iptables rules
+  # bypass host firewalls such as ufw, and its only callers are the guardians
+  # on this host's network. Set SIDECAR_BIND_ADDR only if something off-box
+  # must reach it, and then put authentication in front of it.
+  #
+  # ORCHESTRATOR_AUTH_TOKEN is the shared secret callers must present. The
+  # orchestrator source lives outside this repository: confirm the image you
+  # deploy enforces it before relying on it. Until it does, loopback binding
+  # is the only control, so keep SIDECAR_BIND_ADDR at 127.0.0.1.
+  #
+  # Runs as whatever user the image declares; the Docker socket makes that
+  # root-equivalent either way.
   compute-orchestrator:
-    image: ${COMPUTE_IMAGE:-public.ecr.aws/palliora/orchestrator:latest}
+    image: ${COMPUTE_IMAGE:-set-compute-image-in-env}
     profiles: [compute, operator]
     restart: always
     <<: *host-gateway
+    depends_on:
+      preflight-compute:
+        condition: service_completed_successfully
     ports:
-      - ${COMPUTE_PORT:-7778}:7778
-      - ${RESULT_RELAY_PORT:-4040}:4040
+      - ${SIDECAR_BIND_ADDR:-127.0.0.1}:${COMPUTE_PORT:-7778}:7778
+      - ${SIDECAR_BIND_ADDR:-127.0.0.1}:${RESULT_RELAY_PORT:-4040}:4040
     environment:
       PORT: 7778
       RELAY_PORT: 4040
@@ -264,9 +591,11 @@ services:
       PALLIORA_RPC_URL: ${GUARDIAN_RPC_WS:-ws://host.docker.internal:9947}
       OLLAMA_BASE_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       COST_ESTIMATOR_URL: ${COST_ESTIMATOR_URL:-http://estimation-server:4141}
-      PRIVATE_KEY: ${PRIVATE_KEY:?set PRIVATE_KEY in .env}
-      SUBMITTER_ACCOUNT_ID: ${SUBMITTER_ACCOUNT_ID:?set SUBMITTER_ACCOUNT_ID in .env}
-      STATIC_RESPONSE_KEY: ${STATIC_RESPONSE_KEY}
+      # Checked by preflight-compute (set, not a placeholder, not a public key).
+      PRIVATE_KEY: ${PRIVATE_KEY:-}
+      SUBMITTER_ACCOUNT_ID: ${SUBMITTER_ACCOUNT_ID:-}
+      STATIC_RESPONSE_KEY: ${STATIC_RESPONSE_KEY:-}
+      ORCHESTRATOR_AUTH_TOKEN: ${ORCHESTRATOR_AUTH_TOKEN:-}
       REDIS_HOST: 127.0.0.1
       REDIS_PORT: 6379
     volumes:
@@ -278,16 +607,20 @@ services:
     group_add:
       - ${DOCKER_GID:-988}
 
-  # Serves TRAINING_HOST (/create-groups).
+  # Serves TRAINING_HOST (/create-groups). Also holds the Docker socket, so it
+  # is published on loopback only, like the orchestrator.
   training-server:
-    image: ${TRAINING_IMAGE:-public.ecr.aws/palliora/palliora/training-server}
+    image: ${TRAINING_IMAGE:-set-training-image-in-env}
     profiles: [compute, operator]
     restart: always
     depends_on:
-      - redis
+      preflight-compute:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
     <<: *host-gateway
     ports:
-      - ${TRAINING_PORT:-7777}:7777
+      - ${SIDECAR_BIND_ADDR:-127.0.0.1}:${TRAINING_PORT:-7777}:7777
     environment:
       WS_ENDPOINT: ${GUARDIAN_RPC_WS:-ws://host.docker.internal:9947}
       NODE_ENV: production
@@ -301,22 +634,40 @@ services:
 
   # Backs the orchestrator's /rate-quote. Only needed for agreements carrying
   # an oracle_quote_id; without it guardians price against their own thresholds.
+  # The orchestrator reaches it by name on the compose network; the host port
+  # is for local debugging only, so it is on SIDECAR_BIND_ADDR too.
+  # TODO: run as non-root once the image's writable paths (/app/data) are
+  # known; it currently runs as the image's default user.
   estimation-server:
-    image: ${ESTIMATION_IMAGE:-public.ecr.aws/palliora/cost-estimation}
+    image: ${ESTIMATION_IMAGE:-set-estimation-image-in-env}
     profiles: [compute, operator]
     restart: always
+    depends_on:
+      preflight-compute:
+        condition: service_completed_successfully
     <<: *host-gateway
     ports:
-      - ${ESTIMATION_PORT:-4141}:4141
+      - ${SIDECAR_BIND_ADDR:-127.0.0.1}:${ESTIMATION_PORT:-4141}:4141
     environment:
       PALLIORA_WS: ${GUARDIAN_RPC_WS:-ws://host.docker.internal:9947}
       NODE_ENV: production
 
   # The training-server's job queue. The orchestrator has its own Redis in-image.
+  # A datastore: never add a `ports:` entry. It is reachable only by name on
+  # the compose network, has no password, and must stay that way.
+  # redis:8.10.3-alpine is what redis:alpine resolved to on 2026-11-05.
   redis:
-    image: ${REDIS_IMAGE:-redis:alpine}
+    image: ${REDIS_IMAGE:-redis:8.10.3-alpine@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537}
     profiles: [compute, operator]
     restart: always
+    user: redis
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   # ───────────────────────────────────────────────────────────────────────────
   # Presigned-upload gateway — its own profile, so it runs on whichever box
@@ -334,39 +685,58 @@ services:
   # Against a pruned one an older block answers 403 "transaction not found in
   # block", which reads as a bad request rather than as missing history.
   #
+  # AWS credentials: NONE are passed in. The AWS SDK's default chain picks up
+  # the EC2 instance profile (or ECS task role), which must be a dedicated
+  # role allowed only s3:PutObject on <AWS_S3_BUCKET>/Contracts/* — see
+  # docs/SECURITY-DEPLOYMENT.md. Static AWS_ACCESS_KEY_ID/SECRET values in
+  # .env are what the 2026-10-31 attacker stole; do not reintroduce them.
+  #
+  # Host network, so that it — and no bridge-network container — can reach
+  # the instance metadata service under IMDSv2 hop limit 1. It therefore
+  # listens on S3_AUTH_PORT on every interface: keep that port closed in the
+  # security group except to the load balancer / reverse proxy in front of it.
+  #
+  # Runs as the image's own USER (node); the old `user: "0"` override is gone.
   # The image carries its own HEALTHCHECK against /healthz, so there is no
-  # healthcheck: block here. It answers healthy on a blank AWS key and only
+  # healthcheck: block here. It answers healthy without credentials and only
   # fails on the first upload, so verify a POST, not just the health check.
   s3-auth-service:
-    image: ${S3_AUTH_IMAGE:-public.ecr.aws/palliora/s3-auth-service:latest}
+    image: ${S3_AUTH_IMAGE:-set-s3-auth-image-in-env}
     profiles: [s3auth]
     restart: always
+    network_mode: host
     <<: *host-gateway
-    # Mirrors the live container on main, which overrides the image's
-    # USER node. Nothing is mounted and the process only listens and reads
-    # env, so this is probably droppable — untested.
-    user: "0"
-    ports:
-      - ${S3_AUTH_PORT:-3000}:3000
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      preflight-s3auth:
+        condition: service_completed_successfully
     environment:
-      PORT: 3000
+      PORT: ${S3_AUTH_PORT:-3000}
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-palliora-storage}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      PALLIORA_WS: ${S3_AUTH_CHAIN_WS:-ws://host.docker.internal:9944}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      PALLIORA_WS: ${S3_AUTH_CHAIN_WS:-ws://127.0.0.1:9944}
 
   # ───────────────────────────────────────────────────────────────────────────
   # Dev-key nodes — opt-in (COMPOSE_PROFILES=validator,extras), CPU machine.
+  # Their keys (//Alice, //Bob, //Charlie) are public. Never make them
+  # authorities on a shared network.
   # ───────────────────────────────────────────────────────────────────────────
 
   alice:
     <<: *node
     profiles: [extras]
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/alice:/data
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9954/health"]
     command:
       - --alice
-      - --base-path=/root/palliora-data/alice
-      - --port=30323
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30323
       - --rpc-port=9954
       - --blocks-pruning=archive
       - --state-pruning=archive
@@ -377,10 +747,17 @@ services:
   bob:
     <<: *node
     profiles: [extras]
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/bob:/data
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9955/health"]
     command:
       - --bob
-      - --base-path=/root/palliora-data/bob
-      - --port=30324
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30324
       - --rpc-port=9955
       - --blocks-pruning=${EXTRAS_PRUNING:-2560}
       - --state-pruning=${EXTRAS_PRUNING:-2560}
@@ -388,10 +765,17 @@ services:
   charlie:
     <<: *node
     profiles: [extras]
+    volumes:
+      - *mount-timezone
+      - *mount-localtime
+      - *mount-chain-spec
+      - ${NODE_DATA_ROOT:-/home/ubuntu/node-data}/charlie:/data
+    healthcheck:
+      <<: *node-healthcheck
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9956/health"]
     command:
       - --charlie
-      - --base-path=/root/palliora-data/charlie
-      - --port=30325
+      - --listen-addr=/ip4/${LISTEN_IP:-0.0.0.0}/tcp/30325
       - --rpc-port=9956
       - --blocks-pruning=${EXTRAS_PRUNING:-2560}
       - --state-pruning=${EXTRAS_PRUNING:-2560}
