@@ -252,8 +252,9 @@ Create `~/node/.env` next to `docker-compose.yml`. Use **absolute paths** (no `~
 # Role: one guardian plus every compute service
 COMPOSE_PROFILES=operator
 
-# Images by digest only (repo@sha256:...). These are the Manas spec 33 releases.
-NODE_IMAGE=public.ecr.aws/palliora/palliora/node@sha256:da048ab3c22d37bf0fa3e804bcee055bdfefc247f220f533e6af0bf0aef7ef69
+# Images by digest only (repo@sha256:...). NODE_IMAGE is the Manas spec 34
+# release; the compute images below work with it unchanged.
+NODE_IMAGE=public.ecr.aws/palliora/palliora/node@sha256:27720e38edba8178e341996745f1d62d7675a51d46708f241a04c3b386c277d4
 COMPUTE_IMAGE=public.ecr.aws/palliora/orchestrator@sha256:fdd4fc40185adc60cde98f73f791347192c23c463ae68ba481e5c7c531dfff15
 TRAINING_IMAGE=public.ecr.aws/palliora/palliora/training-server@sha256:68a669e7f52560692c1a35bed97db3f12a19482c0ebd4488bc9d8c05e036b63e
 ESTIMATION_IMAGE=public.ecr.aws/palliora/cost-estimation@sha256:e9ed9e2e710d67c1b7fcf945fab79f716629fdcf9a381a4d198cd5f80998152b
