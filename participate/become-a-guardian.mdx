@@ -231,6 +231,10 @@ Create a working directory and put the two attached files in it:
 mkdir -p ~/node/compute ~/node-data ~/my-guardian/keystore
 cd ~/node
 # put docker-compose.yml and palliora-manas.json here
+
+# The node runs as uid 10000 and must own its data and key directories
+sudo install -d -o 10000 -g 10000 ~/node-data/guardian-operator
+sudo chown -R 10000:10000 ~/my-guardian && sudo chmod -R go-rwx ~/my-guardian
 ```
 
 | Path                      | Purpose                                                                              |
@@ -238,7 +242,7 @@ cd ~/node
 | `~/node/`                 | Compose directory: `docker-compose.yml`, `palliora-manas.json`, `.env`               |
 | `~/node/compute/`         | Where the orchestrator stores job payloads (`COMPUTE_STAGING_DIR`)                   |
 | `~/node-data/`            | Node database; the guardian uses `~/node-data/guardian-operator/` (`NODE_DATA_ROOT`) |
-| `~/my-guardian/keystore/` | Your guardian's session keys (`KEYSTORE_ROOT`)                                       |
+| `~/my-guardian/keystore/` | Your guardian's session keys (`KEYSTORE_ROOT` is `~/my-guardian`)                    |
 
 **Configure `.env`**
 
@@ -248,7 +252,12 @@ Create `~/node/.env` next to `docker-compose.yml`. Use **absolute paths** (no `~
 # Role: one guardian plus every compute service
 COMPOSE_PROFILES=operator
 
-NODE_IMAGE=public.ecr.aws/palliora/palliora/node:rc5
+# Images by digest only (repo@sha256:...). NODE_IMAGE is the Manas spec 34
+# release; the compute images below work with it unchanged.
+NODE_IMAGE=public.ecr.aws/palliora/palliora/node@sha256:27720e38edba8178e341996745f1d62d7675a51d46708f241a04c3b386c277d4
+COMPUTE_IMAGE=public.ecr.aws/palliora/orchestrator@sha256:fdd4fc40185adc60cde98f73f791347192c23c463ae68ba481e5c7c531dfff15
+TRAINING_IMAGE=public.ecr.aws/palliora/palliora/training-server@sha256:68a669e7f52560692c1a35bed97db3f12a19482c0ebd4488bc9d8c05e036b63e
+ESTIMATION_IMAGE=public.ecr.aws/palliora/cost-estimation@sha256:e9ed9e2e710d67c1b7fcf945fab79f716629fdcf9a381a4d198cd5f80998152b
 CHAIN_SPEC=./palliora-manas.json
 
 # Manas bootnode, as published by Palliora
@@ -260,7 +269,6 @@ PUBLIC_IP=<your-public-ipv4>
 # Storage
 NODE_DATA_ROOT=/home/ubuntu/node-data
 KEYSTORE_ROOT=/home/ubuntu/my-guardian
-OPERATOR_KEYSTORE_PATH=/root/keystores/keystore
 COMPUTE_STAGING_DIR=/home/ubuntu/node/compute
 
 # Guardian node
@@ -282,20 +290,34 @@ PRIVATE_KEY=<private-key>
 
 # 64-byte hex key for Ed25519-encrypted results; leave empty for plaintext only
 STATIC_RESPONSE_KEY=
+
+# Shared secret for the orchestrator: openssl rand -hex 32
+ORCHESTRATOR_AUTH_TOKEN=<random-32-bytes-hex>
 ```
 
-| Variable                                   | Notes                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BOOTNODE_MULTIADDR`                       | The address your node dials first, in the form `/ip4/<ip>/tcp/30333/p2p/<peer-id>`. Use the value Palliora publishes. A wrong address or peer ID produces no error: the node just stays at `peers: 0`.                                                                                                                                                         |
-| `PUBLIC_IP`                                | Your machine's public IPv4. The guardian advertises it with port `OPERATOR_P2P_PORT`, so other guardians can connect to you. If it's missing, the node won't start. If it's wrong, the node syncs from the bootnode but no guardian ever connects to it. Use a static address (an Elastic IP on AWS). Behind NAT, forward `OPERATOR_P2P_PORT` to this machine. |
-| `KEYSTORE_ROOT` / `OPERATOR_KEYSTORE_PATH` | `KEYSTORE_ROOT` is mounted read-only at `/root/keystores`, so the keystore at `~/my-guardian/keystore` is `/root/keystores/keystore` inside the container.                                                                                                                                                                                                     |
-| `GUARDIAN_RPC_WS`                          | Must be your guardian's RPC port. If you change `OPERATOR_RPC_PORT`, change this too; one is not derived from the other.                                                                                                                                                                                                                                       |
-| `COMPUTE_STAGING_DIR`                      | Mounted at the same absolute path inside and outside the container.                                                                                                                                                                                                                                                                                            |
-| `DOCKER_GID`                               | Lets the orchestrator use the Docker socket to start job containers.                                                                                                                                                                                                                                                                                           |
+Before anything starts, a `preflight-*` service checks this file and stops the stack if a value is still a placeholder, an image is not pinned by digest, or a key is a publicly known one (the all-zero or 0x…01 seed, a `//Alice`-style dev account, a Hardhat test key).
+
+| Variable                                    | Notes                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BOOTNODE_MULTIADDR`                        | The address your node dials first, in the form `/ip4/<ip>/tcp/30333/p2p/<peer-id>`. Use the value Palliora publishes. A wrong address or peer ID produces no error: the node just stays at `peers: 0`.                                                                                                                                                         |
+| `PUBLIC_IP`                                 | Your machine's public IPv4. The guardian advertises it with port `OPERATOR_P2P_PORT`, so other guardians can connect to you. If it's missing, the node won't start. If it's wrong, the node syncs from the bootnode but no guardian ever connects to it. Use a static address (an Elastic IP on AWS). Behind NAT, forward `OPERATOR_P2P_PORT` to this machine. |
+| `KEYSTORE_ROOT`                             | Your key directory. It is mounted read-only at `/keys`, and the node reads `/keys/keystore`, so the key files go in `~/my-guardian/keystore/`. Owned by uid 10000. `OPERATOR_KEYSTORE_PATH` no longer exists.                                                                                                                                                  |
+| `NODE_IMAGE` and the other `*_IMAGE` values | Must be `repo@sha256:<digest>`. Tags such as `rc6` or `latest` are mutable and are refused.                                                                                                                                                                                                                                                                    |
+| `ORCHESTRATOR_AUTH_TOKEN`                   | At least 32 random characters. Keep the compute ports on `127.0.0.1` regardless.                                                                                                                                                                                                                                                                               |
+| `GUARDIAN_RPC_WS`                           | Must be your guardian's RPC port. If you change `OPERATOR_RPC_PORT`, change this too; one is not derived from the other.                                                                                                                                                                                                                                       |
+| `COMPUTE_STAGING_DIR`                       | Mounted at the same absolute path inside and outside the container.                                                                                                                                                                                                                                                                                            |
+| `DOCKER_GID`                                | Lets the orchestrator use the Docker socket to start job containers.                                                                                                                                                                                                                                                                                           |
 
 **Configure result submission**
 
-The orchestrator's result relay submits `compute.result` transactions from a separate account. That account needs PALI to pay fees.
+The orchestrator's result relay submits `compute.result` transactions from a separate account. That account needs PALI to pay fees, and it is the account paid for each result.
+
+The chain accepts results only from result submitters. An account becomes one in either of two ways:
+
+* **Register with stake.** Bond at least the minimum guardian bond (1,000 PALI) from the account, then have it submit `compute.registerResultSubmitter` itself. The bond is checked again on every result, so if the account unbonds below the minimum, its results are refused until it bonds again. It can withdraw with `compute.unregisterResultSubmitter`.
+* **Ask governance.** Root adds the account with `compute.addResultSubmitter`.
+
+Until the account is a result submitter, every result it submits is refused.
 
 * `SUBMITTER_ACCOUNT_ID`: its SS58 address.
 * `PRIVATE_KEY`: its private key.
@@ -304,9 +326,20 @@ Use a different account from your guardian account. Create it in its own CLI dir
 
 ```bash
 PALLIORA_DIR=~/.palliora-relay palliora-cli account-create
-PALLIORA_DIR=~/.palliora-relay palliora-cli fund --amount 100
+PALLIORA_DIR=~/.palliora-relay palliora-cli fund --amount 1100
 PALLIORA_DIR=~/.palliora-relay palliora-cli account-show --secret
 ```
+
+To register with stake, bond from this account, then register it:
+
+```bash
+PALLIORA_DIR=~/.palliora-relay palliora-cli stake-new --amount 1000
+PALLIORA_DIR=~/.palliora-relay palliora-cli register-result-submitter
+```
+
+`register-result-submitter` checks the bond before it submits anything. If the account bonds less than the minimum, it stops and tells you the minimum bond. If the account is already a result submitter, it says so and submits nothing. The command needs palliora-cli 2.0.1 or later. Update an older install with `npm i -g @palliora.org/cli`.
+
+If governance adds the account instead, `fund --amount 100` is enough for fees.
 
 ```
 $ palliora-cli account-show --secret
@@ -329,35 +362,36 @@ Put `address` in `SUBMITTER_ACCOUNT_ID` and `privateKey` in `PRIVATE_KEY`.
 
 **Firewall**
 
-| Port                               | Open to               | Why                                                                                        |
-| ---------------------------------- | --------------------- | ------------------------------------------------------------------------------------------ |
-| `30336/tcp` (`OPERATOR_P2P_PORT`)  | the internet          | Guardian peer-to-peer traffic                                                              |
-| `9947/tcp` (`OPERATOR_RPC_PORT`)   | **this machine only** | The node serves RPC on every interface, including methods that read and write the keystore |
-| `7777`, `7778`, `4040`, `4141/tcp` | **this machine only** | Compute services; only your guardian calls them                                            |
-| `11434/tcp` (Ollama)               | **this machine only** | Only the orchestrator calls it                                                             |
+| Port                               | Open to               | Why                                                                        |
+| ---------------------------------- | --------------------- | -------------------------------------------------------------------------- |
+| `30336/tcp` (`OPERATOR_P2P_PORT`)  | the internet          | Guardian peer-to-peer traffic                                              |
+| `9947/tcp` (`OPERATOR_RPC_PORT`)   | **this machine only** | The node serves RPC (safe methods only) on every interface                 |
+| `7777`, `7778`, `4040`, `4141/tcp` | **this machine only** | Compute services; only your guardian calls them                            |
+| `11434/tcp` (Ollama)               | **nowhere**           | Ollama has no authentication; it listens on the Docker bridge address only |
 
 <Danger>
 
-Never open the RPC port to `0.0.0.0/0`. A cloud security group that allows all inbound traffic does exactly that, and exposes your node's keystore to the internet.
+Never open the RPC port, or anything but `OPERATOR_P2P_PORT`, to `0.0.0.0/0`. A cloud security group that allows all inbound traffic does exactly that. On AWS, also require IMDSv2 with hop limit 1 and attach no instance role.
 
 </Danger>
 
 **Ollama setup**
 
-Ollama runs directly on the host, not in Docker, and holds the GPU. The orchestrator reaches it at `host.docker.internal`, so on Linux it must listen on an address other than `127.0.0.1`:
+Ollama runs directly on the host, not in Docker, and holds the GPU. **It has no authentication**, so it must not listen on any address another machine can reach. The orchestrator reaches it at `host.docker.internal`, which on Linux is the `docker0` bridge address (usually `172.17.0.1`): bind Ollama to that address only. It is local to this machine, and `127.0.0.1` alone would be unreachable from the orchestrator's container.
 
-1. Pull the models you want to serve (for example `llama3.1:latest`):
-
-   ```bash
-   ollama pull llama3.1:latest
-   ```
-2. Start the server so containers can reach it:
+1. Pull the models you want to serve, by explicit tag (for example `llama3.1:8b`):
 
    ```bash
-   OLLAMA_HOST=0.0.0.0:11434 ollama serve
+   ollama pull llama3.1:8b
+   ```
+2. Bind the server to the Docker bridge address:
+
+   ```bash
+   ip -4 -o addr show docker0 | awk '{print $4}'   # e.g. 172.17.0.1/16
+   OLLAMA_HOST=172.17.0.1:11434 ollama serve
    ```
 
-   If you installed Ollama as a systemd service, set `Environment="OLLAMA_HOST=0.0.0.0:11434"` with `sudo systemctl edit ollama`, then restart it.
+   If you installed Ollama as a systemd service, run `sudo systemctl edit ollama`, add `After=docker.service` under `[Unit]` and `Environment="OLLAMA_HOST=172.17.0.1:11434"` under `[Service]`, then restart it. Never use `OLLAMA_HOST=0.0.0.0`.
 
 <Warning>
 
@@ -385,17 +419,17 @@ Make sure nothing else is using ports 9947 and 30336, then run this from `~/node
 ```bash
 cd ~/node && set -a && . ./.env && set +a
 
-docker run -d --name guardian-bootstrap --network host \
-  -v "$PWD/palliora-manas.json:/root/palliora-manas.json:ro" \
-  -v "$NODE_DATA_ROOT:/root/palliora-data" \
-  -v "$KEYSTORE_ROOT:/root/keystores" \
+docker run -d --name guardian-bootstrap --network host --user 10000:10000 \
+  -v "$PWD/palliora-manas.json:/etc/palliora/palliora-manas.json:ro" \
+  -v "$NODE_DATA_ROOT/guardian-operator:/data" \
+  -v "$KEYSTORE_ROOT:/keys" \
   --entrypoint /usr/local/bin/palliora-node \
   "$NODE_IMAGE" \
-  --chain=/root/palliora-manas.json \
+  --chain=/etc/palliora/palliora-manas.json \
   --bootnodes="$BOOTNODE_MULTIADDR" \
   --guardian \
-  --base-path=/root/palliora-data/guardian-operator \
-  --keystore-path="$OPERATOR_KEYSTORE_PATH" \
+  --base-path=/data \
+  --keystore-path=/keys/keystore \
   --port="$OPERATOR_P2P_PORT" \
   --rpc-port="$OPERATOR_RPC_PORT" \
   --rpc-methods=Unsafe \
@@ -593,7 +627,7 @@ They are paid to your reward destination, which is your own account unless you s
 
 **Updating the node and services**
 
-When a new image is released, update `NODE_IMAGE` in `.env` if the tag changed, then:
+When a new image is released, set `NODE_IMAGE` (and any compute `*_IMAGE` that changed) in `.env` to the new digest, then:
 
 ```bash
 cd ~/node
@@ -601,7 +635,7 @@ docker compose pull
 docker compose up -d
 ```
 
-This keeps your database, keys and on-chain registration. The compute images use the `latest` tag, so `pull` picks up new versions. Job containers are left in place on purpose; remove old `compute-<block>-<index>` containers when they pile up.
+This keeps your database, keys and on-chain registration. Every image is pinned by digest, so nothing changes until you change `.env`; `pull` never picks up a moved tag. Job containers are left in place on purpose; remove old `compute-<block>-<index>` containers when they pile up.
 
 **When your public IP changes**
 
@@ -648,18 +682,21 @@ cd ~/node && docker compose down
 
 #### Troubleshooting
 
-| Symptom                                                                   | Likely cause                                                                                             | Fix                                                                                                               |
-| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Node stays at `peers: 0` with no errors                                   | Wrong `BOOTNODE_MULTIADDR` (address or peer ID), port 30336 blocked, or a different chain spec           | Check the bootnode value, the firewall, and that `palliora-manas.json` is the current attachment                  |
-| Node exits with `Keystore(Io(Os { code: 30, kind: ReadOnlyFilesystem }))` | The keystore path does not exist inside the container. Despite the wording, the mount is not the problem | Check that `KEYSTORE_ROOT` and `OPERATOR_KEYSTORE_PATH` together point at a directory that contains the key files |
-| Node exits with `invalid value '/ip4/PUBLIC_IP-not-set/...'`              | `PUBLIC_IP` is not set                                                                                   | Set it in `.env`                                                                                                  |
-| `docker compose` refuses to start: `set ... in .env`                      | A required variable is missing                                                                           | Set `BOOTNODE_MULTIADDR`, `PRIVATE_KEY`, `PUBLIC_IP` and `SUBMITTER_ACCOUNT_ID`                                   |
-| `guardianList` returns `[]`                                               | You queried a validator or the public RPC, or the guardian mesh has not formed yet                       | Query `127.0.0.1:9947`; wait a few minutes after startup                                                          |
-| Your peer ID is not in `guardianList`                                     | Not joined, the worker step went to the wrong node, or the next era has not started                      | Run `join-guardian` again through `ws://127.0.0.1:9947`; wait up to one era                                       |
-| In the list, but agreements are never accepted                            | Session keys missing from the keystore or never registered                                               | Repeat key generation with `--rotate-keys`                                                                        |
-| Logs show `Rejecting agreement ... offered rate < threshold`              | Offers are below your fee                                                                                | Lower `--fee` for that compute type if you want the work                                                          |
-| Jobs finish with failed results, `fetch failed` in the orchestrator log   | Ollama is not running, or it listens on `127.0.0.1` only                                                 | Start Ollama with `OLLAMA_HOST=0.0.0.0:11434` and check that `OLLAMA_URL` is reachable                            |
-| Orchestrator cannot start job containers                                  | Wrong `DOCKER_GID`                                                                                       | Set it to the output of `stat -c '%g' /var/run/docker.sock`                                                       |
-| Results are never submitted                                               | The result relay account has run out of PALI                                                             | Fund `SUBMITTER_ACCOUNT_ID`                                                                                       |
-| `--rotate-keys` fails with an unsafe-RPC or read-only error               | It was run against the normal stack, not the temporary node                                              | Follow the temporary node steps                                                                                   |
-| Node syncs but `peers` stays at `1`                                       | Only the bootnode is reachable: `PUBLIC_IP` is wrong, or `30336` is not open from the internet           | Check `PUBLIC_IP` against `curl -s ifconfig.me`, and test the port from another network                           |
+| Symptom                                                                     | Likely cause                                                                                             | Fix                                                                                                                                                  |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node stays at `peers: 0` with no errors                                     | Wrong `BOOTNODE_MULTIADDR` (address or peer ID), port 30336 blocked, or a different chain spec           | Check the bootnode value, the firewall, and that `palliora-manas.json` is the current attachment                                                     |
+| Node exits with `Keystore(Io(Os { code: 30, kind: ReadOnlyFilesystem }))`   | The keystore path does not exist inside the container. Despite the wording, the mount is not the problem | Check that `KEYSTORE_ROOT` contains a `keystore/` directory holding the key files                                                                    |
+| Node exits with `invalid value '/ip4/PUBLIC_IP-not-set/...'`                | `PUBLIC_IP` is not set                                                                                   | Set it in `.env`                                                                                                                                     |
+| Node exits with `Permission denied` on `/data` or `/keys`                   | The directory is owned by root or your user, not by the node's uid                                       | `sudo chown -R 10000:10000 ~/node-data/guardian-operator ~/my-guardian`                                                                              |
+| `service "preflight-..." didn't complete successfully`                      | `.env` still has a placeholder, an image tag instead of a digest, or a publicly known key                | `docker compose logs preflight-node preflight-compute` names the variable                                                                            |
+| `docker compose` refuses to start: `set ... in .env`                        | A required variable is missing                                                                           | Set `NODE_IMAGE`, `BOOTNODE_MULTIADDR` and `PUBLIC_IP`                                                                                               |
+| `guardianList` returns `[]`                                                 | You queried a validator or the public RPC, or the guardian mesh has not formed yet                       | Query `127.0.0.1:9947`; wait a few minutes after startup                                                                                             |
+| Your peer ID is not in `guardianList`                                       | Not joined, the worker step went to the wrong node, or the next era has not started                      | Run `join-guardian` again through `ws://127.0.0.1:9947`; wait up to one era                                                                          |
+| In the list, but agreements are never accepted                              | Session keys missing from the keystore or never registered                                               | Repeat key generation with `--rotate-keys`                                                                                                           |
+| Logs show `Rejecting agreement ... offered rate < threshold`                | Offers are below your fee                                                                                | Lower `--fee` for that compute type if you want the work                                                                                             |
+| Jobs finish with failed results, `fetch failed` in the orchestrator log     | Ollama is not running, or it listens on `127.0.0.1` only                                                 | Bind Ollama to the Docker bridge address (`OLLAMA_HOST=172.17.0.1:11434`, see Ollama setup), never `0.0.0.0`                                         |
+| Orchestrator cannot start job containers                                    | Wrong `DOCKER_GID`                                                                                       | Set it to the output of `stat -c '%g' /var/run/docker.sock`                                                                                          |
+| Results are never submitted                                                 | The result relay account has run out of PALI                                                             | Fund `SUBMITTER_ACCOUNT_ID`                                                                                                                          |
+| Results are never submitted, relay logs `BadSigner` or `NotResultSubmitter` | The relay account is not a result submitter, or its bond fell below 1,000 PALI                           | Bond it and run `PALLIORA_DIR=~/.palliora-relay palliora-cli register-result-submitter`, or have governance add it with `compute.addResultSubmitter` |
+| `--rotate-keys` fails with an unsafe-RPC or read-only error                 | It was run against the normal stack, not the temporary node                                              | Follow the temporary node steps                                                                                                                      |
+| Node syncs but `peers` stays at `1`                                         | Only the bootnode is reachable: `PUBLIC_IP` is wrong, or `30336` is not open from the internet           | Check `PUBLIC_IP` against `curl -s ifconfig.me`, and test the port from another network                                                              |

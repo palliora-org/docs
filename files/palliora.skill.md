@@ -122,6 +122,7 @@ a full working decrypt, not a placeholder.
 | `compute.agreement` never completes, no error | A named guardian hasn't responded. Parked in a future queue. |
 | `AgreementNotFound` on `invoke` | Unknown contract ID, or a `Subscription` with no settlement record. |
 | `InvalidContractType` on `invoke` | `invoke` only works on `Subscription` contracts. |
+| `NotTopLevelCall` | `agreement` or `invoke` wrapped in a batch, proxy or multisig. Submit it directly. |
 | `bad point: invalid y coordinate` from `gen_shared_key` | Passed a sr25519 key where an Ed25519 key was expected, see the known gap above. |
 | No `compute.result` within the wait window | Give it 300 blocks, not the SDK's 20-block default. |
 
